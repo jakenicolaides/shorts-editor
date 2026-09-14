@@ -171,8 +171,23 @@ def _poller():
         time.sleep(20)
 
 
+BUSY_STAGES = {"queued", "audio", "transcribe", "solve", "cut", "loudness", "render", "editing", "uploading", "approving"}
+
+
+def _sweep_orphans():
+    """No work survives a restart: a job left mid-stage has nothing running it."""
+    for j in pipeline.list_jobs():
+        if j["status"].get("stage") in BUSY_STAGES:
+            job = pipeline.Job(j["id"])
+            has_video = (job.dir / "out.mp4").exists()
+            job.set(stage="review" if has_video else "failed",
+                    error=None if has_video else "interrupted before the first render; drop the clip again",
+                    msg="server restarted mid-job" + (": showing the last render" if has_video else ""))
+
+
 def main():
     pipeline.WORK.mkdir(exist_ok=True)
+    _sweep_orphans()
     threading.Thread(target=_poller, daemon=True).start()
     srv = ThreadingHTTPServer(("127.0.0.1", PORT), H)
     print(f"shorts-editor on http://localhost:{PORT}")
