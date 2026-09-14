@@ -89,3 +89,51 @@ if __name__ == "__main__":
         wav = extract_audio(src, Path(td) / "a.wav")
         t = transcribe(wav)
     print(json.dumps(t, indent=1))
+
+
+def frame_db(audio_wav: Path, frame_ms: int = 10):
+    """Per-frame RMS in dB for edge snapping."""
+    import numpy as np
+    from scipy.io import wavfile
+    rate, x = wavfile.read(str(audio_wav))
+    x = x.astype(np.float32) / 32768.0
+    n = int(rate * frame_ms / 1000)
+    m = len(x) // n
+    fr = x[:m * n].reshape(m, n)
+    db = 20 * np.log10(np.sqrt((fr ** 2).mean(axis=1)) + 1e-9)
+    return db, frame_ms / 1000.0
+
+
+def snap_start(db, dt, t, max_back=0.6):
+    """Walk back from t while the audio is still speech, so the cut lands on the
+    onset rather than on Whisper's (late) word timestamp."""
+    import numpy as np
+    thr = float(np.percentile(db, 90)) - 20.0  # 20 dB under the speech level
+    i = int(t / dt)
+    lo = max(0, int((t - max_back) / dt))
+    hi = min(len(db) - 1, int((t + max_back) / dt))
+    if db[i] > thr:
+        while i - 1 >= lo and db[i - 1] > thr:   # Whisper late: walk back to the onset
+            i -= 1
+    else:
+        while i + 1 <= hi and db[i + 1] <= thr:  # Whisper early: walk forward to the onset
+            i += 1
+        i += 1
+    return i * dt
+
+
+def snap_end(db, dt, t, max_fwd=0.8):
+    """Walk forward from t while the audio is still speech (Whisper ends early)."""
+    import numpy as np
+    thr = float(np.percentile(db, 90)) - 20.0  # 20 dB under the speech level
+    i = int(t / dt)
+    hi = min(len(db) - 1, int((t + max_fwd) / dt))
+    lo = max(0, int((t - max_fwd) / dt))
+    if db[i] > thr:
+        while i + 1 <= hi and db[i + 1] > thr:   # Whisper early: walk forward to the offset
+            i += 1
+    else:
+        while i - 1 >= lo and db[i - 1] <= thr:  # Whisper late: walk back to the offset
+            i -= 1
+        i -= 1
+    return (i + 1) * dt

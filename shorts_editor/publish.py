@@ -54,12 +54,22 @@ def _s3(cfg):
                         config=Config(signature_version="s3v4", s3={"addressing_style": "virtual"}))
 
 
+def job_game(job) -> str:
+    game = job.meta.get("game") or "auto"
+    if game == "auto":
+        solve = json.loads((job.dir / "solve.json").read_text()) if (job.dir / "solve.json").exists() else {}
+        game = solve.get("game") or "clip"
+    return game
+
+
 def final_name(job) -> str:
-    game = job.meta.get("game") or "clip"
-    solve = json.loads((job.dir / "solve.json").read_text()) if (job.dir / "solve.json").exists() else {}
-    if game == "auto" and solve.get("game"):
-        game = solve["game"]
-    return f"{job.id[:10]}-{game}.mp4"
+    """The name typed at upload, else <date>-<game>."""
+    title = (job.meta.get("title") or "").strip()
+    safe = "".join(c for c in title if c not in '/\\:*?"<>|').strip()
+    return (safe or f"{job.id[:10]}-{job_game(job)}") + ".mp4"
+
+
+GAME_FOLDERS = {"twixtle": "twixtle/Dailies", "vowelsweeper": "vowelsweeper"}
 
 
 def _presign(s3, cfg, method, key, extra=None):
@@ -140,13 +150,13 @@ def _notify(cfg, job, link):
 
 
 def archive(job, cfg) -> Path:
-    base = Path(cfg.get("ARCHIVE_DIR") or (Path.home() / "Library/CloudStorage/Dropbox/shorts"))
-    dst_dir = base / job.id[:10]
+    base = Path(cfg.get("ARCHIVE_DIR") or (Path.home() / "Library/CloudStorage/Dropbox"))
+    dst_dir = base / GAME_FOLDERS.get(job_game(job), "shorts")
     try:
         dst_dir.mkdir(parents=True, exist_ok=True)
     except PermissionError:
         # macOS refuses the Dropbox folder to some processes; keep the final locally
-        dst_dir = ROOT / "work" / "_archive" / job.id[:10]
+        dst_dir = ROOT / "work" / "_archive" / GAME_FOLDERS.get(job_game(job), "shorts")
         dst_dir.mkdir(parents=True, exist_ok=True)
         job.set(msg=f"Dropbox folder not writable from this process, archived under {dst_dir} instead")
     name = final_name(job)

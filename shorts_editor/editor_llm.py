@@ -20,7 +20,8 @@ class EditDecision(BaseModel):
     max_gap: Optional[float] = Field(default=None, description="New silence threshold in seconds, or null to leave it")
     air: Optional[float] = None
     start_air: Optional[float] = None
-    tail: Optional[float] = Field(default=None, description="Seconds kept after the solve moment")
+    end_air: Optional[float] = Field(default=None, description="Seconds of air after the last word before the video ends (default 0.15)")
+    post_solve_window: Optional[float] = Field(default=None, description="The last word within this many seconds after the solve chime ends the video (default 8)")
     protect_before: Optional[float] = None
     min_duration: Optional[float] = None
     remove_fillers: Optional[bool] = None
@@ -38,11 +39,11 @@ SYSTEM = """You are the editor for short vertical puzzle-game videos (TikTok sty
 You can only change the parameters and ranges in the output schema. All times are SOURCE seconds (the raw recording), never output seconds. The timeline you are given is the transcript of the raw recording with gaps marked, and the current keep list says which source ranges survive.
 
 How the automatic cut works, so you know which knob does what:
-- The video starts at the first real word minus start_air.
+- The video starts on the first real word (start_air is near zero and the onset is snapped to the audio).
 - Any stretch longer than max_gap seconds with no real word (silence, or only fillers like um/err) is removed, leaving `air` seconds either side. Stretches shorter than max_gap are kept whole.
-- The video ends at the solve moment plus `tail` seconds. The protect_before seconds before the solve are never cut, so the solve keeps its natural pacing.
+- The video ends right after the last word said within post_solve_window seconds of the solve chime, plus end_air. The protect_before seconds before the solve are never cut, so the solve keeps its natural pacing.
 - speed is a uniform playback speed-up applied to the whole video.
-- If the result is under min_duration the system loosens max_gap, then stops removing fillers, then lengthens the tail.
+- If the result is under min_duration the system loosens max_gap, then stops removing fillers.
 - Overrides win over the rules: start_override/end_override/solve_override pin those moments; keep ranges are never cut; extra cuts are always removed.
 
 Guidance:
@@ -127,7 +128,7 @@ def apply(decision: EditDecision, params: dict) -> dict:
     if decision.clear_overrides:
         p["keep_ranges"], p["extra_cuts"] = [], []
         p["start_override"] = p["end_override"] = p["solve_override"] = None
-    for k in ("max_gap", "air", "start_air", "tail", "protect_before", "min_duration",
+    for k in ("max_gap", "air", "start_air", "end_air", "post_solve_window", "protect_before", "min_duration",
               "remove_fillers", "speed", "start_override", "end_override", "solve_override"):
         v = getattr(decision, k)
         if v is not None:

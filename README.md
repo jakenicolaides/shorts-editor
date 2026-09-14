@@ -14,8 +14,9 @@ Dropbox (archive).
    (it re-cuts and re-renders, ~2 min). Or press "Send for review on phone".
 4. On the phone: the review link (copy it from the page, or set IMESSAGE_TO in
    .env and it is iMessaged to you). Approve, or send notes from there too.
-5. Approve archives the final to `~/Library/CloudStorage/Dropbox/shorts/<date>/`
-   and "Download to phone" on the review page saves the MP4 to the phone.
+5. Approve archives the final as `<name you typed>.mp4` into Dropbox:
+   `twixtle/Dailies/` for Twixtle, `vowelsweeper/` for Vowelsweeper. "Download
+   to phone" on the review page saves the MP4 to the phone.
 
 The S3 copy expires after 14 days on its own.
 
@@ -38,12 +39,14 @@ run downloads the model).
 
 ## The rules (shorts_editor/cutlist.py)
 
-* start at the first real word (minus 0.3s)
+* start on the first real word, snapped to the audio onset (no lead-in)
+* a phrase restarted after a pause loses its first attempt (false start)
 * any stretch over 5s with no real word (silence, or only um/err) is removed,
   leaving 0.5s of air either side; shorter pauses are kept whole
-* end at the solve tone plus 2.5s; the 15s before the solve are never cut
+* end 0.15s after the last word said within 8s of the solve chime, snapped to
+  the audio; the 15s before the solve are never cut
 * under 1:30 after the speed-up: loosen the gap threshold (7/10/15s), then keep
-  fillers, then lengthen the tail; still short is flagged on the review page
+  fillers; still short is flagged on the review page
 * speed is chosen at drop time and applied uniformly (pitch preserved)
 * audio: two-pass loudnorm to -14 LUFS, -1 dBTP
 * video: 1080x1920 H.264 high, CRF 18, AAC 192k 48kHz, faststart

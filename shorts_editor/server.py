@@ -2,7 +2,7 @@
 
   GET  /                      the page
   GET  /jobs                  job list (json)
-  PUT  /upload?name=&speed=&game=   raw file body -> starts a job
+  PUT  /upload?name=&speed=&game=&title=   raw file body -> starts a job
   GET  /jobs/<id>             status + sidecar (json)
   GET  /jobs/<id>/video       current render (range requests supported)
   POST /jobs/<id>/note        {"note": "..."}  -> editor loop, re-render
@@ -138,6 +138,7 @@ class H(BaseHTTPRequestHandler):
         name = Path(unquote(q.get("name", ["clip.mp4"])[0])).name
         speed = float(q.get("speed", ["1.0"])[0])
         game = q.get("game", ["auto"])[0]
+        title = unquote(q.get("title", [""])[0])
         n = int(self.headers.get("Content-Length") or 0)
         if n <= 0:
             return self._json({"error": "empty body"}, 400)
@@ -152,7 +153,7 @@ class H(BaseHTTPRequestHandler):
                     break
                 out.write(chunk)
                 remaining -= len(chunk)
-        job = pipeline.Job.create(dst, speed, game, name=name)
+        job = pipeline.Job.create(dst, speed, game, name=name, title=title)
         dst.unlink(missing_ok=True)
         _run_bg(job.id, job.run)
         return self._json({"id": job.id})

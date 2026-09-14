@@ -75,13 +75,13 @@ class Job:
 
     # ---- steps --------------------------------------------------------------
     @classmethod
-    def create(cls, src: Path, speed: float, game: str, name: str = None) -> "Job":
+    def create(cls, src: Path, speed: float, game: str, name: str = None, title: str = None) -> "Job":
         job_id = datetime.now().strftime("%Y-%m-%d-%H%M%S")
         job = cls(job_id)
         dst = job.dir / ("input" + src.suffix.lower())
         shutil.copy2(src, dst)
         _write(job.dir / "meta.json", {
-            "name": name or src.name, "game": game, "speed": speed, "created": time.time(),
+            "name": name or src.name, "title": (title or "").strip(), "game": game, "speed": speed, "created": time.time(),
         })
         p = cutlist.Params(speed=speed)
         _write(job.dir / "params.json", p.to_dict())
@@ -140,6 +140,20 @@ class Job:
             _write(self.dir / "params.json", p.to_dict())
         else:
             res = cutlist.build(words, info["duration"], solve, p)
+        # snap the first and last cut to the audio: Whisper's word times are late
+        # at onsets and early at offsets, and the brief is no space either side
+        if res["keep"] and p.start_override is None:
+            db, dt = transcribe.frame_db(self.dir / "audio.wav")
+            s0 = transcribe.snap_start(db, dt, res["keep"][0][0] + p.start_air)
+            res["keep"][0][0] = round(max(0.0, s0 - p.start_air), 3)
+            res["start"] = res["keep"][0][0]
+            if p.end_override is None:
+                e1 = transcribe.snap_end(db, dt, res["keep"][-1][1] - p.end_air)
+                res["keep"][-1][1] = round(min(info["duration"], e1 + p.end_air), 3)
+                res["end"] = res["keep"][-1][1]
+            kept = sum(e - s_ for s_, e in res["keep"])
+            res["source_kept"] = round(kept, 3)
+            res["final_duration"] = round(kept / max(p.speed, 0.01), 3)
         _write(self.dir / "cut.json", res)
         self.set(stage="cut", progress=45,
                  msg=f"cut: {len(res['keep'])} segments, {res['source_kept']:.0f}s kept -> {res['final_duration']:.0f}s final"

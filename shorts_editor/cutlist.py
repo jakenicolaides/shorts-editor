@@ -2,11 +2,13 @@
 
 A cut list is a list of [start, end] keep segments in source time, in order.
 The rules (see README) in one place:
-  * start at the first real word minus start_air
+  * start on the first real word (start_air is near zero; the pipeline snaps
+    it to the audio onset)
   * any stretch longer than max_gap with no real word in it (silence, or
     fillers only) is collapsed to `air` seconds either side
-  * end at the solve moment plus `tail`; the `protect_before` seconds before
-    the solve are never cut, so the solve moment keeps its natural pacing
+  * end right after the last word said within post_solve_window of the solve
+    chime (plus end_air); the `protect_before` seconds before the solve are
+    never cut, so the solve moment keeps its natural pacing
   * explicit overrides (start/end/keep_ranges/extra_cuts) come from the
     human-editor loop and win over the automatic rules
 """
@@ -18,8 +20,10 @@ from typing import Optional
 class Params:
     max_gap: float = 5.0          # seconds of no-content before we cut
     air: float = 0.5              # seconds left either side of a cut
-    start_air: float = 0.3        # seconds before the first word
-    tail: float = 2.5             # seconds kept after the solve moment
+    start_air: float = 0.05       # seconds before the first word (start right away)
+    end_air: float = 0.15         # seconds after the last word (end right away)
+    post_solve_window: float = 8.0  # the last word within this many s after the chime ends the video
+    chime_len: float = 0.8        # fallback end when nothing is said after the chime
     protect_before: float = 15.0  # no cuts inside this window before the solve
     min_duration: float = 90.0    # target floor for the FINAL (post-speed) length
     remove_fillers: bool = True   # fillers count as non-content (so they can be cut)
@@ -117,9 +121,10 @@ def build(words, duration, solve_at, p: Params):
     if p.end_override is not None:
         end = p.end_override
     elif solve is not None:
-        end = solve + p.tail
+        after = [e for s_, e in content if solve <= e <= solve + p.post_solve_window]
+        end = (max(after) if after else solve + p.chime_len) + p.end_air
     else:
-        end = content[-1][1] + p.tail
+        end = content[-1][1] + p.end_air
         flags.append("no_solve_detected")
     end = min(end, duration)
     start = max(0.0, min(start, end))
@@ -127,7 +132,7 @@ def build(words, duration, solve_at, p: Params):
     # Protected windows behave like content.
     protected = list(p.keep_ranges or [])
     if solve is not None:
-        protected.append([max(start, solve - p.protect_before), min(end, solve + p.tail)])
+        protected.append([max(start, solve - p.protect_before), end])
     content = content + [(s, e) for s, e in protected]
 
     # Clip to bounds and group by max_gap.
@@ -163,7 +168,6 @@ def build(words, duration, solve_at, p: Params):
 RELAX_LADDER = [
     ("max_gap", 7.0), ("max_gap", 10.0), ("max_gap", 15.0),
     ("remove_fillers", False),
-    ("tail", "+2"), ("tail", "+2"),
 ]
 
 
@@ -176,12 +180,9 @@ def build_with_relax(words, duration, solve_at, p: Params):
     for key, val in RELAX_LADDER:
         if res["final_duration"] >= cur.min_duration:
             break
-        if key == "tail" and isinstance(val, str):
-            cur.tail = cur.tail + float(val)
-        else:
-            if getattr(cur, key) == val:
-                continue
-            setattr(cur, key, val)
+        if getattr(cur, key) == val:
+            continue
+        setattr(cur, key, val)
         steps.append(f"{key}={getattr(cur, key)}")
         res = build(words, duration, solve_at, cur)
     if res["final_duration"] < cur.min_duration:
