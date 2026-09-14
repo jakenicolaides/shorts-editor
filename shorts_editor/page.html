@@ -167,6 +167,7 @@ async function showDetail() {
   const sig = JSON.stringify([st.stage, st.progress, (st.log || []).length, (j.history || []).length, j.meta.review_link, j.meta.review_version, cut.final_duration]);
   if (sig !== shownSig) {
     const noteDraft = el.querySelector('#note') ? el.querySelector('#note').value : '';
+    const openSections = [...el.querySelectorAll('details[open]')].map(d => d.dataset.k);
     $('#info').innerHTML = `
         <div><b>${j.meta.title || j.meta.name}</b> <small>${j.meta.title ? j.meta.name : ''}</small> · ${st.stage} ${busy ? '(working)' : ''}</div>
         <div class="bar" style="margin:6px 0 10px"><i style="width:${st.progress || 0}%"></i></div>
@@ -186,9 +187,10 @@ async function showDetail() {
           <button id="rerun" ${busy ? 'disabled' : ''}>Re-render</button>
           <button id="approve" class="primary" ${busy || !ver ? 'disabled' : ''}>Send for review on phone</button>
         </div>
-        <details><summary>Log</summary><pre>${(st.log || []).join('\n')}</pre></details>
-        <details><summary>Cut list</summary><pre>${(cut.keep || []).map(([s,e]) => fmt(s) + ' - ' + fmt(e)).join('\n')}</pre></details>`;
+        <details data-k="log"><summary>Log</summary><pre>${(st.log || []).join('\n')}</pre></details>
+        <details data-k="cuts"><summary>Cut list</summary><pre>${(cut.keep || []).map(([s,e]) => fmt(s) + ' - ' + fmt(e)).join('\n')}</pre></details>`;
     shownSig = sig;
+    el.querySelectorAll('details').forEach(d => { if (openSections.includes(d.dataset.k)) d.open = true; });
     $('#send').onclick = async () => { const n = $('#note').value.trim(); if (!n) return;
       await fetch('/jobs/' + sel + '/note', { method: 'POST', body: JSON.stringify({ note: n }) }); $('#note').value = ''; shownSig = null; refresh(); };
     $('#rerun').onclick = async () => { await fetch('/jobs/' + sel + '/rerun', { method: 'POST' }); shownSig = null; refresh(); };
