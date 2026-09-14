@@ -1,0 +1,6 @@
+.venv/
+fixtures/*.mp4
+work/
+.env
+__pycache__/
+*.pyc

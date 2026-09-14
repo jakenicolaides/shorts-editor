@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "shorts-editor",
+      "runtimeExecutable": ".venv/bin/python",
+      "runtimeArgs": ["-m", "shorts_editor.server"],
+      "port": 8790
+    }
+  ]
+}

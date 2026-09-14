@@ -1,0 +1,5 @@
+mlx-whisper
+numpy
+scipy
+anthropic
+boto3
