@@ -192,11 +192,21 @@ async function showDetail() {
     shownSig = sig;
     el.querySelectorAll('details').forEach(d => { if (openSections.includes(d.dataset.k)) d.open = true; });
     $('#send').onclick = async () => { const n = $('#note').value.trim(); if (!n) return;
-      await fetch('/jobs/' + sel + '/note', { method: 'POST', body: JSON.stringify({ note: n }) }); $('#note').value = ''; shownSig = null; refresh(); };
-    $('#rerun').onclick = async () => { await fetch('/jobs/' + sel + '/rerun', { method: 'POST' }); shownSig = null; refresh(); };
-    $('#approve').onclick = async () => { await fetch('/jobs/' + sel + '/approve', { method: 'POST' }); shownSig = null; refresh(); };
+      if (await post('/jobs/' + sel + '/note', { note: n })) { $('#note').value = ''; } };
+    $('#rerun').onclick = () => post('/jobs/' + sel + '/rerun');
+    $('#approve').onclick = () => post('/jobs/' + sel + '/approve');
   }
   if (busy) setTimeout(showDetail, 1500);
+}
+async function post(path, body) {
+  let r;
+  try { r = await fetch(path, { method: 'POST', body: body ? JSON.stringify(body) : null }); }
+  catch (e) { alert('The server is not responding. Restart Shorts Editor.'); return false; }
+  if (!r.ok) {
+    const msg = r.status === 404 ? 'This button needs a newer server: close the Terminal window and open Shorts Editor again.' : ((await r.json().catch(() => ({}))).error || ('Failed: ' + r.status));
+    alert(msg); return false;
+  }
+  shownSig = null; refresh(); return true;
 }
 function fmt(s) { if (s == null) return '?'; s = Math.round(s); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); }
 function esc(s) { return String(s || '').replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
