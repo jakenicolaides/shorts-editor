@@ -19,7 +19,7 @@ from pathlib import Path
 from . import pipeline
 
 ROOT = Path(__file__).resolve().parent.parent
-PAGE = (ROOT / "shorts_editor" / "page.html").read_text()
+PAGE_FILE = ROOT / "shorts_editor" / "page.html"  # read per request so edits need no restart
 PORT = int(os.environ.get("SHORTS_PORT", "8790"))
 
 _locks = {}
@@ -51,7 +51,7 @@ class H(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path == "/" or self.path.startswith("/?"):
-            body = PAGE.encode()
+            body = PAGE_FILE.read_text().encode()
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))

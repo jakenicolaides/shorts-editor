@@ -90,19 +90,26 @@ async function refresh() {
   if (sel) showDetail();
 }
 
-let lastVersion = null;
+let shownJob = null, shownVersion = null, shownSig = null;
 async function showDetail() {
   const j = await (await fetch('/jobs/' + sel)).json();
   const st = j.status || {}, side = j.sidecar || {}, cut = side.cut || {}, busy = !['review','failed','approved','awaiting_review','new'].includes(st.stage);
   const ver = (j.meta || {}).version || 0;
   const el = $('#detail');
-  const noteDraft = el.querySelector('#note') ? el.querySelector('#note').value : '';
-  el.innerHTML = `
-    <div class="detail">
-      <div>
-        ${ver ? `<video id="v" controls playsinline src="/jobs/${sel}/video?v=${ver}"></video>` : `<div style="color:#888">Rendering...</div>`}
-      </div>
-      <div>
+  // The player lives in its own box and is only replaced when a new render lands,
+  // otherwise redrawing the panel would restart playback every few seconds.
+  if (shownJob !== sel) {
+    el.innerHTML = '<div class="detail"><div id="vidbox"></div><div id="info"></div></div>';
+    shownJob = sel; shownVersion = null; shownSig = null;
+  }
+  if (ver !== shownVersion) {
+    $('#vidbox').innerHTML = ver ? `<video id="v" controls playsinline preload="metadata" src="/jobs/${sel}/video?v=${ver}"></video>` : `<div style="color:#888">Rendering...</div>`;
+    shownVersion = ver;
+  }
+  const sig = JSON.stringify([st.stage, st.progress, (st.log || []).length, (j.history || []).length, j.meta.review_link, j.meta.review_version, cut.final_duration]);
+  if (sig !== shownSig) {
+    const noteDraft = el.querySelector('#note') ? el.querySelector('#note').value : '';
+    $('#info').innerHTML = `
         <div><b>${j.meta.title || j.meta.name}</b> <small>${j.meta.title ? j.meta.name : ''}</small> · ${st.stage} ${busy ? '(working)' : ''}</div>
         <div class="bar" style="margin:6px 0 10px"><i style="width:${st.progress || 0}%"></i></div>
         ${(side.flags || []).map(f => `<span class="flag">${f}</span>`).join('')}
@@ -122,14 +129,14 @@ async function showDetail() {
           <button id="approve" class="primary" ${busy || !ver ? 'disabled' : ''}>Send for review on phone</button>
         </div>
         <details><summary>Log</summary><pre>${(st.log || []).join('\n')}</pre></details>
-        <details><summary>Cut list</summary><pre>${(cut.keep || []).map(([s,e]) => fmt(s) + ' - ' + fmt(e)).join('\n')}</pre></details>
-      </div>
-    </div>`;
-  $('#send').onclick = async () => { const n = $('#note').value.trim(); if (!n) return;
-    await fetch('/jobs/' + sel + '/note', { method: 'POST', body: JSON.stringify({ note: n }) }); $('#note').value = ''; refresh(); };
-  $('#rerun').onclick = async () => { await fetch('/jobs/' + sel + '/rerun', { method: 'POST' }); refresh(); };
-  $('#approve').onclick = async () => { await fetch('/jobs/' + sel + '/review', { method: 'POST' }); refresh(); };
-  const cl = $('#copylink'); if (cl) cl.onclick = e => { e.preventDefault(); navigator.clipboard.writeText(j.meta.review_link); cl.textContent = 'copied'; };
+        <details><summary>Cut list</summary><pre>${(cut.keep || []).map(([s,e]) => fmt(s) + ' - ' + fmt(e)).join('\n')}</pre></details>`;
+    shownSig = sig;
+    $('#send').onclick = async () => { const n = $('#note').value.trim(); if (!n) return;
+      await fetch('/jobs/' + sel + '/note', { method: 'POST', body: JSON.stringify({ note: n }) }); $('#note').value = ''; shownSig = null; refresh(); };
+    $('#rerun').onclick = async () => { await fetch('/jobs/' + sel + '/rerun', { method: 'POST' }); shownSig = null; refresh(); };
+    $('#approve').onclick = async () => { await fetch('/jobs/' + sel + '/review', { method: 'POST' }); shownSig = null; refresh(); };
+    const cl = $('#copylink'); if (cl) cl.onclick = e => { e.preventDefault(); navigator.clipboard.writeText(j.meta.review_link); cl.textContent = 'copied'; };
+  }
   if (busy) setTimeout(showDetail, 1500);
 }
 function fmt(s) { if (s == null) return '?'; s = Math.round(s); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); }
