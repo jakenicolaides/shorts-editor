@@ -138,7 +138,9 @@ class H(BaseHTTPRequestHandler):
         name = Path(unquote(q.get("name", ["clip.mp4"])[0])).name
         speed = float(q.get("speed", ["1.0"])[0])
         game = q.get("game", ["auto"])[0]
-        title = unquote(q.get("title", [""])[0])
+        title = unquote(q.get("title", [""])[0]).strip()
+        if len(title) <= 11:
+            return self._json({"error": "a name is required (date plus the puzzle)"}, 400)
         n = int(self.headers.get("Content-Length") or 0)
         if n <= 0:
             return self._json({"error": "empty body"}, 400)

@@ -36,7 +36,7 @@
 <body>
 <h1>Shorts editor</h1>
 
-<div class="drop" id="drop">Drop the raw clip here, or click to choose</div>
+<div class="drop" id="drop">Type the name below, then drop the raw clip here (or click to choose)</div>
 <input type="file" id="file" accept="video/*" hidden>
 <div class="row">
   <label>Name <input type="text" id="title" placeholder="2026-09-14 aye-hassle" style="width:220px"></label>
@@ -47,7 +47,7 @@
   <label>Game <select id="game">
     <option value="auto">auto</option><option value="twixtle">Twixtle</option><option value="vowelsweeper">Vowelsweeper</option>
   </select></label>
-  <span id="upmsg"></span>
+  <span id="upmsg" style="color:#e74"></span>
 </div>
 
 <div class="jobs">
@@ -66,7 +66,12 @@ $('#file').onchange = e => { if (e.target.files[0]) upload(e.target.files[0]); }
 ['dragleave','drop'].forEach(ev => $('#drop').addEventListener(ev, e => { e.preventDefault(); $('#drop').classList.remove('over'); }));
 $('#drop').addEventListener('drop', e => { const f = e.dataTransfer.files[0]; if (f) upload(f); });
 
+function nameOk() {
+  const t = $('#title').value.trim();
+  return t.length > 11 && !/^\d{4}-\d{2}-\d{2}$/.test(t);
+}
 function upload(file) {
+  if (!nameOk()) { $('#upmsg').textContent = 'Type a name first (date plus the puzzle, e.g. 2026-09-14 aye-hassle)'; $('#title').focus(); return; }
   const q = new URLSearchParams({ name: file.name, speed: $('#speed').value, game: $('#game').value, title: $('#title').value.trim() });
   const xhr = new XMLHttpRequest();
   xhr.open('PUT', '/upload?' + q);

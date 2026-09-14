@@ -43,4 +43,6 @@ def main(argv):
 
 
 if __name__ == "__main__":
+    from ._env import clean_dyld
+    clean_dyld()
     main(sys.argv[1:])
