@@ -73,7 +73,23 @@ def _timeline(words, gap_mark=1.5):
     return "\n".join(lines)
 
 
+def _ensure_key():
+    import os
+    if os.environ.get("ANTHROPIC_API_KEY"):
+        return
+    from pathlib import Path
+    for f in (Path(__file__).resolve().parent.parent / ".env",
+              Path.home() / "Documents/unseen_server/srv/www/sites/twixt.games/.env.local",
+              Path.home() / "Documents/unseen_server/srv/www/sites/prospector.unseenforms.com/.env.server"):
+        if f.exists():
+            for line in f.read_text().splitlines():
+                if line.startswith("ANTHROPIC_API_KEY=") and line.split("=", 1)[1].strip():
+                    os.environ["ANTHROPIC_API_KEY"] = line.split("=", 1)[1].strip()
+                    return
+
+
 def decide(note: str, words: list, params: dict, cut: dict, history: list, duration: float) -> EditDecision:
+    _ensure_key()
     client = anthropic.Anthropic()
     keep_txt = "\n".join(f"  {s:.1f}-{e:.1f}" for s, e in cut["keep"])
     hist_txt = "\n".join(f"- reviewer: {h['note']}\n  editor: {h['reply']}" for h in history) or "(none)"

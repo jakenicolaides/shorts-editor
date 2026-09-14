@@ -48,6 +48,8 @@ class Job:
         st = self.status()
         if stage is not None:
             st["stage"] = stage
+            if stage != "failed":
+                st.pop("error", None)
         if progress is not None:
             st["progress"] = progress
         if msg:
@@ -67,6 +69,9 @@ class Job:
     @property
     def meta(self):
         return _read(self.dir / "meta.json", {})
+
+    def _write_meta(self, meta):
+        _write(self.dir / "meta.json", meta)
 
     # ---- steps --------------------------------------------------------------
     @classmethod

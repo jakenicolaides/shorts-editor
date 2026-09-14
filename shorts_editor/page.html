@@ -91,7 +91,7 @@ async function refresh() {
 let lastVersion = null;
 async function showDetail() {
   const j = await (await fetch('/jobs/' + sel)).json();
-  const st = j.status || {}, side = j.sidecar || {}, cut = side.cut || {}, busy = !['review','failed','approved','new'].includes(st.stage);
+  const st = j.status || {}, side = j.sidecar || {}, cut = side.cut || {}, busy = !['review','failed','approved','awaiting_review','new'].includes(st.stage);
   const ver = (j.meta || {}).version || 0;
   const el = $('#detail');
   const noteDraft = el.querySelector('#note') ? el.querySelector('#note').value : '';
@@ -110,13 +110,14 @@ async function showDetail() {
           <span>loudness</span><span>${side.loudness_out ? side.loudness_out.input_i + ' LUFS, peak ' + side.loudness_out.input_tp + ' dBTP' : ''}</span>
           <span>speed</span><span>${(side.params||{}).speed}x · gap ${(side.params||{}).max_gap}s · tail ${(side.params||{}).tail}s</span>
         </div>` : ''}
+        ${j.meta.review_link ? `<div class="hist" style="border-color:#27c"><b>Review link (v${j.meta.review_version}, ${st.stage === 'approved' ? 'approved' : st.stage === 'awaiting_review' ? 'waiting for the phone' : st.stage})</b><a href="${j.meta.review_link}" target="_blank">open review page</a> · <a href="#" id="copylink">copy link</a></div>` : ''}
         <h3 style="margin:16px 0 6px">Notes to the editor</h3>
         ${(j.history || []).map(h => `<div class="hist"><b>You: ${esc(h.note)}</b>Editor: ${esc(h.reply)}</div>`).join('')}
         <textarea id="note" placeholder="e.g. too choppy in the middle, and end a bit later after the solve" ${busy ? 'disabled' : ''}>${esc(noteDraft)}</textarea>
         <div class="row">
           <button id="send" ${busy ? 'disabled' : ''}>Send note</button>
           <button id="rerun" ${busy ? 'disabled' : ''}>Re-render</button>
-          <button id="approve" class="primary" ${busy || !ver ? 'disabled' : ''}>Approve: upload + archive</button>
+          <button id="approve" class="primary" ${busy || !ver ? 'disabled' : ''}>Send for review on phone</button>
         </div>
         <details><summary>Log</summary><pre>${(st.log || []).join('\n')}</pre></details>
         <details><summary>Cut list</summary><pre>${(cut.keep || []).map(([s,e]) => fmt(s) + ' - ' + fmt(e)).join('\n')}</pre></details>
@@ -125,7 +126,8 @@ async function showDetail() {
   $('#send').onclick = async () => { const n = $('#note').value.trim(); if (!n) return;
     await fetch('/jobs/' + sel + '/note', { method: 'POST', body: JSON.stringify({ note: n }) }); $('#note').value = ''; refresh(); };
   $('#rerun').onclick = async () => { await fetch('/jobs/' + sel + '/rerun', { method: 'POST' }); refresh(); };
-  $('#approve').onclick = async () => { await fetch('/jobs/' + sel + '/approve', { method: 'POST' }); refresh(); };
+  $('#approve').onclick = async () => { await fetch('/jobs/' + sel + '/review', { method: 'POST' }); refresh(); };
+  const cl = $('#copylink'); if (cl) cl.onclick = e => { e.preventDefault(); navigator.clipboard.writeText(j.meta.review_link); cl.textContent = 'copied'; };
   if (busy) setTimeout(showDetail, 1500);
 }
 function fmt(s) { if (s == null) return '?'; s = Math.round(s); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); }

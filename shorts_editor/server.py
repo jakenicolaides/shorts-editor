@@ -6,7 +6,7 @@
   GET  /jobs/<id>             status + sidecar (json)
   GET  /jobs/<id>/video       current render (range requests supported)
   POST /jobs/<id>/note        {"note": "..."}  -> editor loop, re-render
-  POST /jobs/<id>/approve     upload + archive (see publish.py)
+  POST /jobs/<id>/review      upload to S3 + make the phone review page (publish.py)
   POST /jobs/<id>/rerun       re-cut + re-render with current params
 """
 import json
@@ -108,7 +108,7 @@ class H(BaseHTTPRequestHandler):
                 remaining -= len(chunk)
 
     def do_POST(self):
-        m = re.match(r"^/jobs/([\w-]+)/(note|approve|rerun)$", self.path)
+        m = re.match(r"^/jobs/([\w-]+)/(note|review|rerun)$", self.path)
         if not m:
             return self._json({"error": "not found"}, 404)
         job = pipeline.Job(m.group(1))
@@ -124,9 +124,9 @@ class H(BaseHTTPRequestHandler):
             _run_bg(job.id, lambda: job.apply_note(note))
         elif action == "rerun":
             _run_bg(job.id, lambda: (job.recut(), job.rerender()))
-        elif action == "approve":
+        elif action == "review":
             from . import publish
-            _run_bg(job.id, lambda: publish.approve(job))
+            _run_bg(job.id, lambda: publish.send_for_review(job))
         return self._json({"ok": True})
 
     def do_PUT(self):
@@ -158,8 +158,21 @@ class H(BaseHTTPRequestHandler):
         return self._json({"id": job.id})
 
 
+def _poller():
+    """Every 20s, look at S3 for decisions made on the phone."""
+    import time
+    from . import publish
+    while True:
+        try:
+            publish.poll_once(pipeline.list_jobs, pipeline.Job, _run_bg)
+        except Exception as e:
+            print("poll error:", e)
+        time.sleep(20)
+
+
 def main():
     pipeline.WORK.mkdir(exist_ok=True)
+    threading.Thread(target=_poller, daemon=True).start()
     srv = ThreadingHTTPServer(("127.0.0.1", PORT), H)
     print(f"shorts-editor on http://localhost:{PORT}")
     srv.serve_forever()

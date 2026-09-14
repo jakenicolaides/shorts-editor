@@ -23,6 +23,7 @@ class Params:
     protect_before: float = 15.0  # no cuts inside this window before the solve
     min_duration: float = 90.0    # target floor for the FINAL (post-speed) length
     remove_fillers: bool = True   # fillers count as non-content (so they can be cut)
+    drop_false_starts: bool = True  # a phrase restarted after a pause loses its first attempt
     speed: float = 1.0
     start_override: Optional[float] = None
     end_override: Optional[float] = None
@@ -67,11 +68,45 @@ def _subtract(keep, cuts):
     return keep
 
 
+def _norm(w):
+    import re
+    return re.sub(r"[^a-z']", "", w.lower())
+
+
+def false_starts(words, min_words=3, pause=1.5, max_len=12.0):
+    """Ranges to drop: a phrase, then a pause, then a phrase that starts with
+    the same first `min_words` words is a restart; the first attempt goes."""
+    groups, cur = [], []
+    for w in words:
+        if w.get("filler"):
+            continue
+        if cur and w["s"] - cur[-1]["e"] > pause:
+            groups.append(cur)
+            cur = []
+        cur.append(w)
+    if cur:
+        groups.append(cur)
+    drops = []
+    for a, b in zip(groups, groups[1:]):
+        if len(a) < min_words or len(b) < min_words:
+            continue
+        if a[-1]["e"] - a[0]["s"] > max_len:
+            continue
+        if [_norm(w["w"]) for w in a[:min_words]] == [_norm(w["w"]) for w in b[:min_words]]:
+            drops.append([a[0]["s"], a[-1]["e"]])
+    return drops
+
+
 def build(words, duration, solve_at, p: Params):
     """Return {"keep": [[s,e],...], "source_kept": float, "final_duration": float,
     "start": float, "end": float, "solve_at": float|None, "flags": [..]}"""
     flags = []
     solve = p.solve_override if p.solve_override is not None else solve_at
+    if p.drop_false_starts:
+        fs = false_starts(words)
+        if fs:
+            flags.append(f"false_starts_dropped:{len(fs)}")
+            words = [w for w in words if not any(a <= w["s"] and w["e"] <= b for a, b in fs)]
     content = [(w["s"], w["e"]) for w in words if not (p.remove_fillers and w.get("filler"))]
     if not content:
         flags.append("no_speech")
