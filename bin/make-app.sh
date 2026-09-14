@@ -32,7 +32,7 @@ fi
 osascript <<'AS'
 tell application "Terminal"
   activate
-  do script "cd \"$ROOT\" && exec .venv/bin/python run.py"
+  do script "cd \"$ROOT\" && .venv/bin/python run.py; exit"
 end tell
 AS
 for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do

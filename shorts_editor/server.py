@@ -23,6 +23,7 @@ PAGE_FILE = ROOT / "shorts_editor" / "page.html"  # read per request so edits ne
 PORT = int(os.environ.get("SHORTS_PORT", "8790"))
 
 _locks = {}
+_page = {"last_ping": 0.0, "seen": False, "bye_at": 0.0}
 
 
 def _lock(job_id):
@@ -38,8 +39,10 @@ def _run_bg(job_id, fn):
 
 class H(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):  # quieter
-        if "/jobs/" not in fmt % args or "video" not in fmt % args:
-            super().log_message(fmt, *args)
+        line = fmt % args
+        if "/ping" in line or ("/jobs" in line and "video" not in line):
+            return
+        super().log_message(fmt, *args)
 
     def _json(self, data, code=200):
         body = json.dumps(data).encode()
@@ -58,6 +61,10 @@ class H(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(body)
             return
+        if self.path == "/ping":
+            import time
+            _page["last_ping"] = time.time(); _page["seen"] = True
+            return self._json({"ok": True})
         if self.path == "/jobs":
             return self._json(pipeline.list_jobs())
         m = re.match(r"^/jobs/([\w-]+)(/video)?(\?.*)?$", self.path)
@@ -108,6 +115,10 @@ class H(BaseHTTPRequestHandler):
                 remaining -= len(chunk)
 
     def do_POST(self):
+        if self.path == "/bye":
+            import time
+            _page["bye_at"] = time.time()
+            return self._json({"ok": True})
         m = re.match(r"^/jobs/([\w-]+)/(note|review|rerun)$", self.path)
         if not m:
             return self._json({"error": "not found"}, 404)
@@ -187,9 +198,43 @@ def _sweep_orphans():
                     msg="server restarted mid-job" + (": showing the last render" if has_video else ""))
 
 
+def _busy():
+    return any(l.locked() for l in _locks.values())
+
+
+def _close_own_terminal():
+    """Close the Terminal window this server was launched in (by its tty)."""
+    import subprocess
+    try:
+        tty = os.ttyname(0)
+    except OSError:
+        return
+    script = f'tell application "Terminal" to close (first window whose tty of selected tab is "{tty}") saving no'
+    subprocess.Popen(["sh", "-c", f"sleep 1; osascript -e '{script}' >/dev/null 2>&1"],
+                     start_new_session=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def _watchdog():
+    """Quit when the page has gone: no ping for 15s (or a bye with no ping after
+    it for 4s, so a reload does not count). Never while a job is running.
+    A phone approval made while we are closed is archived on the next launch."""
+    import time
+    while True:
+        time.sleep(2)
+        if not _page["seen"] or _busy():
+            continue
+        now = time.time()
+        gone = (now - _page["last_ping"] > 15) or (_page["bye_at"] > _page["last_ping"] and now - _page["bye_at"] > 4)
+        if gone:
+            print("page closed, shutting down")
+            _close_own_terminal()
+            os._exit(0)
+
+
 def main():
     pipeline.WORK.mkdir(exist_ok=True)
     _sweep_orphans()
+    threading.Thread(target=_watchdog, daemon=True).start()
     threading.Thread(target=_poller, daemon=True).start()
     srv = ThreadingHTTPServer(("127.0.0.1", PORT), H)
     print(f"shorts-editor on http://localhost:{PORT}")
