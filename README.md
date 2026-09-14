@@ -2,23 +2,19 @@
 
 Automatic first cut for the daily puzzle-game shorts. Drop the raw OBS clip in,
 get back a cut, normalised, TikTok-ready MP4, talk to the editor in plain
-English until it is right, approve, and it lands on S3 (for the phone) and in
-Dropbox (archive).
+English until it is right, save it to Dropbox, post from the phone.
 
 ## Daily workflow
 
-1. `.venv/bin/python run.py` from your own terminal (Terminal.app, so it can
-   write to Dropbox), open http://localhost:8790
-2. Drop the OBS clip in, pick the speed, wait ~90s
+1. Double-click Shorts Editor.app (or `.venv/bin/python run.py`); the page opens
+   at http://localhost:8790
+2. Name (date plus puzzle), game, speed, then drop the OBS clip. About 90s.
 3. Watch the cut on the page. Type notes to the editor if it needs changes
-   (it re-cuts and re-renders, ~2 min). Or press "Send for review on phone".
-4. On the phone: the review link (copy it from the page, or set IMESSAGE_TO in
-   .env and it is iMessaged to you). Approve, or send notes from there too.
-5. Approve archives the final as `<name you typed>.mp4` into Dropbox:
-   `twixtle/Dailies/` for Twixtle, `vowelsweeper/` for Vowelsweeper. "Download
-   to phone" on the review page saves the MP4 to the phone.
+   (it re-cuts and re-renders, about 2 min).
+4. Save to Dropbox: `<name>.mp4` lands in `twixtle/Dailies/` or `vowelsweeper/`.
+   Post it from the Dropbox app on the phone.
 
-The S3 copy expires after 14 days on its own.
+Closing the page quits the server and its Terminal window.
 
 ## Run
 
@@ -77,6 +73,6 @@ ranges (editor_llm.py, strict schema), then the job re-cuts and re-renders.
       editor_llm.py   note -> typed decision
       pipeline.py     job dirs under work/<id>/
       server.py       local drop UI
-      publish.py      approve: Dropbox archive + S3 + prod register
+      publish.py      save to Dropbox
     templates/        solve tone wavs
     fixtures/         raw test clips (gitignored)

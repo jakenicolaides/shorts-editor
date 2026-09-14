@@ -6,7 +6,7 @@
   GET  /jobs/<id>             status + sidecar (json)
   GET  /jobs/<id>/video       current render (range requests supported)
   POST /jobs/<id>/note        {"note": "..."}  -> editor loop, re-render
-  POST /jobs/<id>/review      upload to S3 + make the phone review page (publish.py)
+  POST /jobs/<id>/approve     save the final to Dropbox (publish.py)
   POST /jobs/<id>/rerun       re-cut + re-render with current params
 """
 import json
@@ -119,7 +119,7 @@ class H(BaseHTTPRequestHandler):
             import time
             _page["bye_at"] = time.time()
             return self._json({"ok": True})
-        m = re.match(r"^/jobs/([\w-]+)/(note|review|rerun)$", self.path)
+        m = re.match(r"^/jobs/([\w-]+)/(note|approve|rerun)$", self.path)
         if not m:
             return self._json({"error": "not found"}, 404)
         job = pipeline.Job(m.group(1))
@@ -135,9 +135,9 @@ class H(BaseHTTPRequestHandler):
             _run_bg(job.id, lambda: job.apply_note(note))
         elif action == "rerun":
             _run_bg(job.id, lambda: (job.recut(), job.rerender()))
-        elif action == "review":
+        elif action == "approve":
             from . import publish
-            _run_bg(job.id, lambda: publish.send_for_review(job))
+            _run_bg(job.id, lambda: publish.approve(job))
         return self._json({"ok": True})
 
     def do_PUT(self):
@@ -172,19 +172,7 @@ class H(BaseHTTPRequestHandler):
         return self._json({"id": job.id})
 
 
-def _poller():
-    """Every 20s, look at S3 for decisions made on the phone."""
-    import time
-    from . import publish
-    while True:
-        try:
-            publish.poll_once(pipeline.list_jobs, pipeline.Job, _run_bg)
-        except Exception as e:
-            print("poll error:", e)
-        time.sleep(20)
-
-
-BUSY_STAGES = {"queued", "audio", "transcribe", "solve", "cut", "loudness", "render", "editing", "uploading", "approving"}
+BUSY_STAGES = {"queued", "audio", "transcribe", "solve", "cut", "loudness", "render", "editing", "saving"}
 
 
 def _sweep_orphans():
@@ -217,7 +205,7 @@ def _close_own_terminal():
 def _watchdog():
     """Quit when the page has gone: no ping for 15s (or a bye with no ping after
     it for 4s, so a reload does not count). Never while a job is running.
-    A phone approval made while we are closed is archived on the next launch."""
+"""
     import time
     while True:
         time.sleep(2)
@@ -235,7 +223,6 @@ def main():
     pipeline.WORK.mkdir(exist_ok=True)
     _sweep_orphans()
     threading.Thread(target=_watchdog, daemon=True).start()
-    threading.Thread(target=_poller, daemon=True).start()
     srv = ThreadingHTTPServer(("127.0.0.1", PORT), H)
     print(f"shorts-editor on http://localhost:{PORT}")
     srv.serve_forever()

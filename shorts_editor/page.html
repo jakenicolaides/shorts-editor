@@ -151,7 +151,7 @@ async function refresh() {
 let shownJob = null, shownVersion = null, shownSig = null;
 async function showDetail() {
   const j = await (await fetch('/jobs/' + sel)).json();
-  const st = j.status || {}, side = j.sidecar || {}, cut = side.cut || {}, busy = !['review','failed','approved','awaiting_review','new'].includes(st.stage);
+  const st = j.status || {}, side = j.sidecar || {}, cut = side.cut || {}, busy = !['review','failed','approved','new'].includes(st.stage);
   const ver = (j.meta || {}).version || 0;
   const el = $('#detail');
   // The player lives in its own box and is only replaced when a new render lands,
@@ -164,7 +164,7 @@ async function showDetail() {
     $('#vidbox').innerHTML = ver ? `<video id="v" controls playsinline preload="metadata" src="/jobs/${sel}/video?v=${ver}"></video>` : `<div style="color:#888">Rendering...</div>`;
     shownVersion = ver;
   }
-  const sig = JSON.stringify([st.stage, st.progress, (st.log || []).length, (j.history || []).length, j.meta.review_link, j.meta.review_version, cut.final_duration]);
+  const sig = JSON.stringify([st.stage, st.progress, (st.log || []).length, (j.history || []).length, j.meta.saved_to, cut.final_duration]);
   if (sig !== shownSig) {
     const noteDraft = el.querySelector('#note') ? el.querySelector('#note').value : '';
     const openSections = [...el.querySelectorAll('details[open]')].map(d => d.dataset.k);
@@ -178,14 +178,14 @@ async function showDetail() {
           <span>loudness</span><span>${side.loudness_out ? side.loudness_out.input_i + ' LUFS, peak ' + side.loudness_out.input_tp + ' dBTP' : ''}</span>
           <span>speed</span><span>${(side.params||{}).speed}x · gap ${(side.params||{}).max_gap}s</span>
         </div>` : ''}
-        ${j.meta.review_link ? `<div class="hist" style="border-color:#27c"><b>Review link (v${j.meta.review_version}, ${st.stage === 'approved' ? 'approved' : st.stage === 'awaiting_review' ? 'waiting for the phone' : st.stage})</b><a href="${j.meta.review_link}" target="_blank">open review page</a> · <a href="#" id="copylink">copy link</a></div>` : ''}
+        ${j.meta.saved_to ? `<div class="hist" style="border-color:#27c"><b>Saved to Dropbox</b>${esc(j.meta.saved_to.replace(/^.*CloudStorage\/Dropbox\//, 'Dropbox/'))}</div>` : ''}
         <h3 style="margin:16px 0 6px">Notes to the editor</h3>
         ${(j.history || []).map(h => `<div class="hist"><b>You: ${esc(h.note)}</b>Editor: ${esc(h.reply)}</div>`).join('')}
         <textarea id="note" placeholder="e.g. too choppy in the middle, and end a bit later after the solve" ${busy ? 'disabled' : ''}>${esc(noteDraft)}</textarea>
         <div class="row">
           <button id="send" ${busy ? 'disabled' : ''}>Send note</button>
           <button id="rerun" ${busy ? 'disabled' : ''}>Re-render</button>
-          <button id="approve" class="primary" ${busy || !ver ? 'disabled' : ''}>Send for review on phone</button>
+          <button id="approve" class="primary" ${busy || !ver ? 'disabled' : ''}>${j.meta.saved_to ? 'Save to Dropbox again' : 'Save to Dropbox'}</button>
         </div>
         <details data-k="log"><summary>Log</summary><pre>${(st.log || []).join('\n')}</pre></details>
         <details data-k="cuts"><summary>Cut list</summary><pre>${(cut.keep || []).map(([s,e]) => fmt(s) + ' - ' + fmt(e)).join('\n')}</pre></details>`;
@@ -194,8 +194,7 @@ async function showDetail() {
     $('#send').onclick = async () => { const n = $('#note').value.trim(); if (!n) return;
       await fetch('/jobs/' + sel + '/note', { method: 'POST', body: JSON.stringify({ note: n }) }); $('#note').value = ''; shownSig = null; refresh(); };
     $('#rerun').onclick = async () => { await fetch('/jobs/' + sel + '/rerun', { method: 'POST' }); shownSig = null; refresh(); };
-    $('#approve').onclick = async () => { await fetch('/jobs/' + sel + '/review', { method: 'POST' }); shownSig = null; refresh(); };
-    const cl = $('#copylink'); if (cl) cl.onclick = e => { e.preventDefault(); navigator.clipboard.writeText(j.meta.review_link); cl.textContent = 'copied'; };
+    $('#approve').onclick = async () => { await fetch('/jobs/' + sel + '/approve', { method: 'POST' }); shownSig = null; refresh(); };
   }
   if (busy) setTimeout(showDetail, 1500);
 }
