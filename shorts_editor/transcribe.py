@@ -66,8 +66,8 @@ def transcribe(audio_wav: Path, model: str = MODEL) -> dict:
     for seg in result.get("segments", []):
         for w in seg.get("words", []):
             text = w["word"].strip()
-            if not text:
-                continue
+            if not re.search(r"[A-Za-z0-9]", text):
+                continue  # Whisper emits lone punctuation over silence
             words.append({
                 "w": text,
                 "s": round(float(w["start"]), 3),
