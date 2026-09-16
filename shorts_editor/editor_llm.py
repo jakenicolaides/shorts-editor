@@ -3,7 +3,7 @@ the cut parameters or explicit cut/keep ranges. Claude sees the transcript
 timeline, the current parameters, the current keep list, and the note, and
 returns a strictly-typed decision. It can only move the knobs below, so a note
 can never do anything outside the cut list."""
-from typing import Optional, List
+from typing import List, Literal
 from pydantic import BaseModel, Field
 import anthropic
 
@@ -15,23 +15,18 @@ class Range(BaseModel):
     end: float = Field(description="source seconds")
 
 
+class Change(BaseModel):
+    name: Literal["max_gap", "air", "start_air", "end_air", "post_solve_window", "protect_before",
+                  "min_duration", "remove_fillers", "speed", "start_override", "end_override", "solve_override"]
+    value: float = Field(description="New value. remove_fillers: 1 or 0. start/end/solve_override: source seconds.")
+
+
 class EditDecision(BaseModel):
     reply: str = Field(description="One or two plain sentences back to the reviewer saying what you changed and why, or why you could not.")
-    max_gap: Optional[float] = Field(default=None, description="New silence threshold in seconds, or null to leave it")
-    air: Optional[float] = None
-    start_air: Optional[float] = None
-    end_air: Optional[float] = Field(default=None, description="Seconds of air after the last word before the video ends (default 0.15)")
-    post_solve_window: Optional[float] = Field(default=None, description="The last word within this many seconds after the solve chime ends the video (default 8)")
-    protect_before: Optional[float] = None
-    min_duration: Optional[float] = None
-    remove_fillers: Optional[bool] = None
-    speed: Optional[float] = None
-    start_override: Optional[float] = Field(default=None, description="Force the video to start at this source time")
-    end_override: Optional[float] = Field(default=None, description="Force the video to end at this source time")
-    solve_override: Optional[float] = Field(default=None, description="Where the solve moment actually is, if the detector got it wrong")
+    changes: List[Change] = Field(default_factory=list, description="Parameter changes; leave a knob out to keep it")
     add_keep_ranges: List[Range] = Field(default_factory=list, description="Source ranges that must never be cut")
     add_extra_cuts: List[Range] = Field(default_factory=list, description="Source ranges that must be removed; leave ~0.5s of air yourself")
-    clear_overrides: bool = Field(default=False, description="True to drop every previous keep range, extra cut and start/end/solve override before applying this decision")
+    clear_overrides: bool = Field(default=False, description="True to drop every previous keep range, extra cut and start/end/solve override first")
 
 
 SYSTEM = """You are the editor for short vertical puzzle-game videos (TikTok style). A reviewer watches the automatic cut and sends you a note, the way they would talk to a human editor. You turn the note into a change to the cut.
@@ -45,6 +40,7 @@ How the automatic cut works, so you know which knob does what:
 - speed is a uniform playback speed-up applied to the whole video.
 - If the result is under min_duration the system loosens max_gap, then stops removing fillers.
 - Overrides win over the rules: start_override/end_override/solve_override pin those moments; keep ranges are never cut; extra cuts are always removed.
+- A false start (a sentence begun, abandoned, and begun again) is normally dropped automatically when the restart repeats the first three words. One that was missed is fixed with an extra cut over the abandoned attempt, or a start_override if it is at the very top.
 
 Guidance:
 - Prefer the smallest change that does what the note asks. Adjust a knob for a general complaint ("too choppy", "too many cuts", "it drags"); use ranges for a specific moment ("cut the bit where I mess up the second word", "keep the pause before the last guess").
@@ -97,7 +93,7 @@ def decide(note: str, words: list, params: dict, cut: dict, history: list, durat
     user = f"""Raw recording length: {duration:.1f}s. Solve moment detected at: {cut.get('solve_at')}.
 Current final length: {cut['final_duration']:.1f}s at speed {params.get('speed')}.
 
-Current parameters:
+Current parameters (start_override/end_override/solve_override are null unless pinned):
 {params}
 
 Current keep list (source seconds):
@@ -128,11 +124,8 @@ def apply(decision: EditDecision, params: dict) -> dict:
     if decision.clear_overrides:
         p["keep_ranges"], p["extra_cuts"] = [], []
         p["start_override"] = p["end_override"] = p["solve_override"] = None
-    for k in ("max_gap", "air", "start_air", "end_air", "post_solve_window", "protect_before", "min_duration",
-              "remove_fillers", "speed", "start_override", "end_override", "solve_override"):
-        v = getattr(decision, k)
-        if v is not None:
-            p[k] = v
+    for c in decision.changes:
+        p[c.name] = bool(c.value) if c.name == "remove_fillers" else float(c.value)
     p["keep_ranges"] = list(p.get("keep_ranges") or []) + [[r.start, r.end] for r in decision.add_keep_ranges]
     p["extra_cuts"] = list(p.get("extra_cuts") or []) + [[r.start, r.end] for r in decision.add_extra_cuts]
     return p

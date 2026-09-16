@@ -77,9 +77,13 @@ def _norm(w):
     return re.sub(r"[^a-z']", "", w.lower())
 
 
-def false_starts(words, min_words=3, pause=1.5, max_len=12.0):
-    """Ranges to drop: a phrase, then a pause, then a phrase that starts with
-    the same first `min_words` words is a restart; the first attempt goes."""
+RESTART_PHRASES = ("start again", "start that again", "try again", "do that again", "go again", "take two", "from the top")
+
+
+def false_starts(words, min_words=3, pause=1.5, max_len=12.0, lookahead=2):
+    """Ranges to drop: a phrase, then (optionally a short aside like "let's start
+    that again"), then a phrase that starts with the same first `min_words`
+    words is a restart; everything before the restart goes."""
     groups, cur = [], []
     for w in words:
         if w.get("filler"):
@@ -90,15 +94,41 @@ def false_starts(words, min_words=3, pause=1.5, max_len=12.0):
         cur.append(w)
     if cur:
         groups.append(cur)
+
+    def head(g):
+        return [_norm(w["w"]) for w in g[:min_words]]
+
+    def text(g):
+        return " ".join(_norm(w["w"]) for w in g)
+
     drops = []
-    for a, b in zip(groups, groups[1:]):
-        if len(a) < min_words or len(b) < min_words:
-            continue
-        if a[-1]["e"] - a[0]["s"] > max_len:
-            continue
-        if [_norm(w["w"]) for w in a[:min_words]] == [_norm(w["w"]) for w in b[:min_words]]:
-            drops.append([a[0]["s"], a[-1]["e"]])
-    return drops
+    i = 0
+    while i < len(groups):
+        a = groups[i]
+        hit = None
+        if len(a) >= min_words and a[-1]["e"] - a[0]["s"] <= max_len:
+            for k in range(1, lookahead + 1):
+                if i + k >= len(groups):
+                    break
+                b = groups[i + k]
+                between = groups[i + 1:i + k]
+                # anything skipped over must be a short aside (a restart phrase, or a few words)
+                if any(len(g) > 6 or (g[-1]["e"] - g[0]["s"]) > 4.0 for g in between):
+                    break
+                if len(b) >= min_words and head(b) == head(a):
+                    hit = k
+                    break
+        if hit:
+            drops.append([a[0]["s"], groups[i + hit - 1][-1]["e"]])
+            i += hit
+        else:
+            i += 1
+    # a bare restart phrase right before a phrase is a false start too, even
+    # when the retake does not repeat the words
+    for g, nxt in zip(groups, groups[1:]):
+        if any(ph in text(g) for ph in RESTART_PHRASES) and len(g) <= 6:
+            drops.append([g[0]["s"], g[-1]["e"]])
+    return _merge(sorted(drops)) if drops else []
 
 
 def build(words, duration, solve_at, p: Params):

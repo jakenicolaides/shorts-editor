@@ -142,15 +142,14 @@ class Job:
             res = cutlist.build(words, info["duration"], solve, p)
         # snap the first and last cut to the audio: Whisper's word times are late
         # at onsets and early at offsets, and the brief is no space either side
-        if res["keep"] and p.start_override is None:
+        if res["keep"]:
             db, dt = transcribe.frame_db(self.dir / "audio.wav")
             s0 = transcribe.snap_start(db, dt, res["keep"][0][0] + p.start_air)
             res["keep"][0][0] = round(max(0.0, s0 - p.start_air), 3)
             res["start"] = res["keep"][0][0]
-            if p.end_override is None:
-                e1 = transcribe.snap_end(db, dt, res["keep"][-1][1] - p.end_air)
-                res["keep"][-1][1] = round(min(info["duration"], e1 + p.end_air), 3)
-                res["end"] = res["keep"][-1][1]
+            e1 = transcribe.snap_end(db, dt, res["keep"][-1][1] - p.end_air)
+            res["keep"][-1][1] = round(min(info["duration"], e1 + p.end_air), 3)
+            res["end"] = res["keep"][-1][1]
             kept = sum(e - s_ for s_, e in res["keep"])
             res["source_kept"] = round(kept, 3)
             res["final_duration"] = round(kept / max(p.speed, 0.01), 3)
