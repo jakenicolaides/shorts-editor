@@ -114,10 +114,10 @@ $('#prep-open').onclick = async () => {
   $('#prep-msg').textContent = ''; $('#prep-depth').textContent = 'Checking what is queued...';
   try {
     const r = await (await fetch('/prepare?games=twixtle,vowelsweeper&days=14')).json();
+    const sel = $('#prep-profile'), saved = localStorage.getItem('prepProfile');
+    sel.innerHTML = (r.profiles || []).map(p => `<option value="${esc(p.dir)}" ${p.dir === saved ? 'selected' : ''}>${esc(p.name)}</option>`).join('') || '<option value="">default</option>';
     if (r.error) { $('#prep-depth').textContent = r.error; $('#prep-go').disabled = true; return; }
     prepDepth = r.depth;
-    const sel = $('#prep-profile'), saved = localStorage.getItem('prepProfile');
-    sel.innerHTML = r.profiles.map(p => `<option value="${esc(p.dir)}" ${p.dir === saved ? 'selected' : ''}>${esc(p.name)}</option>`).join('') || '<option value="">default</option>';
     prepCap();
   } catch (e) { $('#prep-depth').textContent = 'Could not reach the posting app'; }
 };

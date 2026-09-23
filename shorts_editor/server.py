@@ -104,9 +104,9 @@ class H(BaseHTTPRequestHandler):
             try:
                 r = poster.record_links(int(q.get("days", ["14"])[0]), games, probe_only=True)
             except Exception as e:
-                return self._json({"error": str(e)}, 502)
-            r["profiles"] = prepare.chrome_profiles()
-            return self._json(r)
+                r = {"error": str(e)}
+            r["profiles"] = prepare.chrome_profiles()   # the profile list is this Mac's, whatever the posting app said
+            return self._json(r, 502 if "error" in r else 200)
         m = re.match(r"^/jobs/([\w-]+)(/video)?(\?.*)?$", self.path)
         if not m:
             return self._json({"error": "not found"}, 404)
