@@ -25,6 +25,10 @@ class Token:
         if self._ev.is_set():
             raise Cancelled()
 
+    @property
+    def cancelled(self) -> bool:
+        return self._ev.is_set()
+
     def popen(self, cmd, **kw):
         self.check()
         with self._lock:

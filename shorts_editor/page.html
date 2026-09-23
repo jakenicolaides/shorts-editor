@@ -55,8 +55,8 @@
     <div id="prep-depth" style="color:#888;font-size:13px;margin:4px 0 8px">Checking what is queued...</div>
     <div class="row"><button class="primary" id="prep-go">Open the tabs</button><button id="prep-close">Close</button><span id="prep-msg" style="color:#888"></span></div>
   </div>
-  <div class="drop" id="drop">Drop the raw clip here, or click to choose</div>
-  <input type="file" id="file" accept="video/*" hidden>
+  <div class="drop" id="drop">Drop the raw clips here (one or several), or click to choose</div>
+  <input type="file" id="file" accept="video/*" multiple hidden>
   <small>That is all: the game and the name are worked out from the clip, and it is cut at 1.0x. Change the speed or the name on the job afterwards.</small>
   <span id="upmsg" style="color:#e74"></span>
 </div>
@@ -71,19 +71,33 @@ const $ = s => document.querySelector(s);
 let sel = null, jobs = [];
 
 $('#drop').onclick = () => $('#file').click();
-$('#file').onchange = e => { if (e.target.files[0]) upload(e.target.files[0]); };
+$('#file').onchange = e => { if (e.target.files.length) uploadAll([...e.target.files]); };
 ['dragenter','dragover'].forEach(ev => $('#drop').addEventListener(ev, e => { e.preventDefault(); $('#drop').classList.add('over'); }));
 ['dragleave','drop'].forEach(ev => $('#drop').addEventListener(ev, e => { e.preventDefault(); $('#drop').classList.remove('over'); }));
-$('#drop').addEventListener('drop', e => { const f = e.dataTransfer.files[0]; if (f) upload(f); });
+$('#drop').addEventListener('drop', e => { const fs = [...e.dataTransfer.files].filter(f => f.type.startsWith('video/') || /\.(mov|mp4|m4v|mkv)$/i.test(f.name)); if (fs.length) uploadAll(fs); });
 
-function upload(file) {
-  const q = new URLSearchParams({ name: file.name });
-  const xhr = new XMLHttpRequest();
-  xhr.open('PUT', '/upload?' + q);
-  xhr.upload.onprogress = e => { $('#upmsg').textContent = 'uploading ' + Math.round(100 * e.loaded / e.total) + '%'; };
-  xhr.onload = () => { const r = JSON.parse(xhr.responseText); if (r.error) { $('#upmsg').textContent = r.error; return; } $('#upmsg').textContent = ''; $('#file').value = ''; sel = r.id; refresh(); };
-  xhr.onerror = () => { $('#upmsg').textContent = 'upload failed'; };
-  xhr.send(file);
+// Several clips at once: uploaded one after another (the server queues the cutting too, so
+// dropping a week's recordings is one gesture and the Mac works through them in turn).
+async function uploadAll(files) {
+  let first = null;
+  for (let i = 0; i < files.length; i++) {
+    const tag = files.length > 1 ? `${i + 1} of ${files.length}: ` : '';
+    try {
+      const id = await upload(files[i], p => { $('#upmsg').textContent = `uploading ${tag}${p}%`; });
+      first = first || id;
+    } catch (e) { $('#upmsg').textContent = `${files[i].name}: ${e.message}`; return; }
+  }
+  $('#upmsg').textContent = ''; $('#file').value = ''; sel = first; refresh();
+}
+function upload(file, onProgress) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('PUT', '/upload?' + new URLSearchParams({ name: file.name }));
+    xhr.upload.onprogress = e => onProgress(Math.round(100 * e.loaded / e.total));
+    xhr.onload = () => { const r = JSON.parse(xhr.responseText); r.error ? reject(new Error(r.error)) : resolve(r.id); };
+    xhr.onerror = () => reject(new Error('upload failed'));
+    xhr.send(file);
+  });
 }
 // Prepare puzzles: one Chrome tab per scheduled puzzle for the next N days, via the posting app.
 let prepDepth = null;

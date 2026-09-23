@@ -120,6 +120,10 @@ because Jake has several and the sign-ins live in one.
   are now every two seconds, which is what Instagram's own encodes use.
 - **The 1:30 floor only loosens** (gap threshold, then fillers). It cannot invent length,
   so a short take flags `under_min_duration` and that is the answer.
+- **One job works at a time** (`server._heavy`, 2026-09-24, with multi-file drop). Whisper
+  and ffmpeg each want the whole machine, so two clips dropped together would run slower
+  than in turn and leave the Mac unusable. A waiting job shows `queued`; cancel or delete
+  while waiting takes effect at once and never waits for the running job.
 - **The intake is the drop and nothing else** (2026-09-19; it was name, game, speed, clip).
   Every question asked before the drop was one the clip answers or one that can wait. The
   game comes from the schedule's match, then what the frame showed, then the solve tone;

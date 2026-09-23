@@ -11,7 +11,8 @@ English until it is right, save it to Dropbox, post from the phone.
 1b. Recording several days at once? **Prepare puzzles** (top of the page): pick how
    many days and which games, and one Chrome tab opens per scheduled puzzle, in day
    order, ready to record. It can only offer as many days as the games have queued.
-2. Drop the OBS clip on the page. That is the whole intake. About 90s later it
+2. Drop the OBS clip on the page, or several at once. That is the whole intake.
+   Jobs are cut one after another. About 90s later it
    is cut at 1.0x, the game is identified, and the job is named
    `<date> <puzzle> <daily|hard>`, e.g. `2026-09-19 pros-towed hard`: the puzzle
    is read off the solved screen and looked up in the game's schedule (a public

@@ -31,6 +31,7 @@ PAGE_FILE = ROOT / "shorts_editor" / "page.html"  # read per request so edits ne
 PORT = int(os.environ.get("SHORTS_PORT", "8790"))
 
 _locks = {}
+_heavy = threading.Lock()   # one job works at a time: Whisper and ffmpeg each want the whole machine
 _page = {"last_ping": 0.0, "seen": False, "bye_at": 0.0}
 
 
@@ -44,7 +45,18 @@ def _run_bg(job, fn):
             if not job.exists():  # deleted before it started
                 return
             job.begin()
-            fn()
+            if _heavy.locked():
+                job.set(stage="queued", msg="waiting: another job is running")
+            while not _heavy.acquire(timeout=0.5):   # a cancel or delete while waiting must not wait for the other job
+                if job.token.cancelled or not job.exists():
+                    if job.exists():
+                        job._cancelled()
+                    return
+            try:
+                if job.exists():
+                    fn()
+            finally:
+                _heavy.release()
     threading.Thread(target=go, daemon=True).start()
 
 
