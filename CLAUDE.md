@@ -30,8 +30,7 @@ only answers a caller who already names the puzzle (both Twixtle words; 8+ Vowel
 squares, all agreeing), so it needs no secret to hand out and cannot be used to read the
 forward queue, which those sites guard. A token'd "list the schedule" endpoint was the
 alternative and was rejected: it puts every future answer on each laptop that holds the
-token. Until both endpoints are deployed, `title.lookup` falls back on a 404 to a constant
-read-only `SELECT` over `ssh unseen-server`; delete that branch once they answer.
+token. Both are live (2026-09-23) and the ssh fallback that bridged the gap is gone.
 
 ## Posting (2026-09-19)
 

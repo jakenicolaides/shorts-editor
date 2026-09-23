@@ -239,7 +239,7 @@ class Job:
             self.set(msg=f"the schedule has this puzzle as: {res['title']}")
         picked = meta.get("game") or "auto"
         found = res.get("game") if (res["title"] or picked == "auto") else None
-        if found not in title.SCHEDULES:
+        if found not in title.GAMES:
             found = None
         if found and picked != found:
             if picked != "auto":
