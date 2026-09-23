@@ -55,6 +55,18 @@ evening, and keeps one video per puzzle, so approving a re-edit replaces the las
   computer in the app's Settings). Without them approve only saves to Dropbox, as before.
   The token can add videos as its user and nothing else.
 
+**Prepare puzzles** (2026-09-24): one Chrome tab per scheduled puzzle for the next N days,
+to record in one sitting. The games refuse to show a future puzzle to the public, so each
+has a `record.php` that opens one only on a link signed with a secret the posting app
+shares with them (`RECORD_LINK_SECRET`, in the three `.env.server` files on the box; the
+posting app's `bin/record-secret.sh` writes it). The editor asks the posting app for the
+links with its ordinary token (`poster.record_links`), so any editor can record and this
+Mac never holds the secret. Twixtle opens in its admin test mode (the puzzle stashed in
+the tab, no play recorded), Vowelsweeper as a `?b=` test board: the same surfaces Jake
+records from by hand. Tabs are in day order, then game, Daily before Hard; the Days box
+is capped at the shallowest ticked queue. Chrome is addressed by profile (`prepare.py`),
+because Jake has several and the sign-ins live in one.
+
 ## Invariants
 
 - **The LLM never touches media.** A note becomes a typed decision (`editor_llm.py`,

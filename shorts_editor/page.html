@@ -10,6 +10,8 @@
   h1 { font-size: 20px; margin: 0 0 16px; }
   .intake { border: 1px solid rgba(127,127,127,.35); border-radius: 12px; padding: 16px; }
   .intake small { display: block; margin-top: 8px; color: #888; }
+  .prep { border: 1px solid rgba(127,127,127,.35); border-radius: 10px; padding: 10px 12px; margin-bottom: 12px; }
+  .prep label { margin-right: 8px; }
   .speeds button { padding: 2px 8px; font-size: 13px; }
   .choices button.picked { background: #2a7; color: #fff; border-color: #2a7; }
   .drop { border: 2px dashed #999; border-radius: 12px; padding: 28px; text-align: center; color: #666; cursor: pointer; }
@@ -42,6 +44,17 @@
 <h1>Shorts editor</h1>
 
 <div class="intake" id="intake">
+  <div class="row" style="margin:0 0 12px;justify-content:space-between">
+    <span style="color:#888">Recording?</span><button id="prep-open">Prepare puzzles</button>
+  </div>
+  <div id="prep" class="prep" hidden>
+    <div class="row"><label>Days <input type="number" id="prep-days" min="1" max="14" value="1" style="width:70px"></label>
+      <label><input type="checkbox" class="prep-game" value="twixtle" checked> Twixtle</label>
+      <label><input type="checkbox" class="prep-game" value="vowelsweeper" checked> Vowelsweeper</label>
+      <label>Chrome profile <select id="prep-profile"></select></label></div>
+    <div id="prep-depth" style="color:#888;font-size:13px;margin:4px 0 8px">Checking what is queued...</div>
+    <div class="row"><button class="primary" id="prep-go">Open the tabs</button><button id="prep-close">Close</button><span id="prep-msg" style="color:#888"></span></div>
+  </div>
   <div class="drop" id="drop">Drop the raw clip here, or click to choose</div>
   <input type="file" id="file" accept="video/*" hidden>
   <small>That is all: the game and the name are worked out from the clip, and it is cut at 1.0x. Change the speed or the name on the job afterwards.</small>
@@ -72,6 +85,40 @@ function upload(file) {
   xhr.onerror = () => { $('#upmsg').textContent = 'upload failed'; };
   xhr.send(file);
 }
+// Prepare puzzles: one Chrome tab per scheduled puzzle for the next N days, via the posting app.
+let prepDepth = null;
+function prepGames() { return [...document.querySelectorAll('.prep-game:checked')].map(c => c.value); }
+function prepCap() {
+  if (!prepDepth) return;
+  const gs = prepGames(), cap = gs.length ? Math.min(...gs.map(g => prepDepth[g] ?? 0)) : 0;
+  const d = $('#prep-days'); d.max = Math.max(cap, 1); if (+d.value > cap) d.value = Math.max(cap, 1);
+  $('#prep-depth').textContent = Object.entries(prepDepth).map(([g, n]) => `${g}: ${n} day${n === 1 ? '' : 's'} queued from today`).join(' · ') + (cap ? '' : ' · nothing to open for this choice');
+  $('#prep-go').disabled = !cap;
+}
+$('#prep-open').onclick = async () => {
+  const box = $('#prep'); box.hidden = !box.hidden; if (box.hidden) return;
+  $('#prep-msg').textContent = ''; $('#prep-depth').textContent = 'Checking what is queued...';
+  try {
+    const r = await (await fetch('/prepare?games=twixtle,vowelsweeper&days=14')).json();
+    if (r.error) { $('#prep-depth').textContent = r.error; $('#prep-go').disabled = true; return; }
+    prepDepth = r.depth;
+    const sel = $('#prep-profile'), saved = localStorage.getItem('prepProfile');
+    sel.innerHTML = r.profiles.map(p => `<option value="${esc(p.dir)}" ${p.dir === saved ? 'selected' : ''}>${esc(p.name)}</option>`).join('') || '<option value="">default</option>';
+    prepCap();
+  } catch (e) { $('#prep-depth').textContent = 'Could not reach the posting app'; }
+};
+document.querySelectorAll('.prep-game').forEach(c => c.onchange = prepCap);
+$('#prep-days').oninput = prepCap;
+$('#prep-close').onclick = () => { $('#prep').hidden = true; };
+$('#prep-go').onclick = async () => {
+  const profile = $('#prep-profile').value; localStorage.setItem('prepProfile', profile);
+  $('#prep-go').disabled = true; $('#prep-msg').textContent = 'Opening...';
+  try {
+    const r = await (await fetch('/prepare', { method: 'POST', body: JSON.stringify({ days: +$('#prep-days').value, games: prepGames(), profile }) })).json();
+    $('#prep-msg').textContent = r.error ? r.error : `Opened ${r.opened.length} tab${r.opened.length === 1 ? '' : 's'} in Chrome`;
+  } catch (e) { $('#prep-msg').textContent = 'The server is not responding'; }
+  $('#prep-go').disabled = false;
+};
 // keep the server alive while this page is open; it quits when the pings stop
 setInterval(() => fetch('/ping').catch(() => {}), 5000);
 fetch('/ping').catch(() => {});

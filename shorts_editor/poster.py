@@ -129,6 +129,14 @@ def schedule(video: Path, name: str, game: str, duration_s: float, token: Token 
     return {"uid": made["uid"], "due_at": done["due_at"], "due_now": done.get("due_now", False), "replaced": made.get("replaced", False)}
 
 
+
+def record_links(days: int, games: list, probe_only: bool = False) -> dict:
+    """Signed links that open scheduled puzzles for recording, from the posting app
+    (which shares a secret with the games). {"from", "depth": {game: days queued},
+    "links": [{"game", "track", "date", "label", "url"}], "expires_at"}."""
+    return _call(config(), "/api/editor/record-links.php", {"days": int(days), "games": list(games), "probe_only": bool(probe_only)})
+
+
 if __name__ == "__main__":
     assert puzzle_from_name("2026-09-19 pros-towed hard", "twixtle") == {
         "game": "twixtle", "track": "bonus", "puzzle_date": "2026-09-19", "start_word": "pros", "end_word": "towed", "puzzle_key": ""}

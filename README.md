@@ -8,6 +8,9 @@ English until it is right, save it to Dropbox, post from the phone.
 
 1. Double-click Shorts Editor.app (or `.venv/bin/python run.py`); the page opens
    at http://localhost:8790
+1b. Recording several days at once? **Prepare puzzles** (top of the page): pick how
+   many days and which games, and one Chrome tab opens per scheduled puzzle, in day
+   order, ready to record. It can only offer as many days as the games have queued.
 2. Drop the OBS clip on the page. That is the whole intake. About 90s later it
    is cut at 1.0x, the game is identified, and the job is named
    `<date> <puzzle> <daily|hard>`, e.g. `2026-09-19 pros-towed hard`: the puzzle
@@ -102,6 +105,7 @@ ranges (editor_llm.py, strict schema), then the job re-cuts and re-renders.
       pipeline.py     job dirs under work/<id>/
       server.py       local drop UI
       publish.py      approve: save to Dropbox, then schedule
-      poster.py       upload to the posting app (shorts.unseenforms.com)
+      poster.py       upload to the posting app (shorts.unseenforms.com); fetch recording links
+      prepare.py      open the recording links in Chrome, by profile
     templates/        solve tone wavs
     fixtures/         raw test clips (gitignored)
