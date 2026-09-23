@@ -138,6 +138,16 @@ def record_links(days: int, games: list, probe_only: bool = False) -> dict:
 
 
 if __name__ == "__main__":
+    import sys
+    if sys.argv[1:] == ["ping"]:   # the installer's check: is this Mac connected?
+        if not enabled():
+            sys.exit("not connected: no POSTER_URL / POSTER_TOKEN in .env")
+        try:
+            r = ping()
+        except RuntimeError as e:
+            sys.exit(str(e))
+        print(f"connected to {config()['POSTER_URL']} as {r['user']}" + ("" if r.get("anthropic_key") else " (no shared Anthropic key set there yet)"))
+        sys.exit(0)
     assert puzzle_from_name("2026-09-19 pros-towed hard", "twixtle") == {
         "game": "twixtle", "track": "bonus", "puzzle_date": "2026-09-19", "start_word": "pros", "end_word": "towed", "puzzle_key": ""}
     assert puzzle_from_name("2026-09-15 Prove daily", "vowelsweeper")["puzzle_key"] == "prove"

@@ -51,6 +51,12 @@ evening, and keeps one video per puzzle, so approving a re-edit replaces the las
   scheduled.
 - **Dropbox first, then the schedule**: the archive must not depend on a server being up.
   Both halves overwrite, so pressing Approve again is always the fix.
+- **A new Mac is one line** (2026-09-24): `curl -fsSL https://shorts.unseenforms.com/install.sh
+  | bash`, served by the posting app. It installs what is missing, clones this repo, asks for
+  the two `POSTER_` lines, fetches the speech model and builds the app; run again to update.
+  The Anthropic key is no longer pasted: the posting app hands its shared key to any editor
+  token (`editor_llm._ensure_key`, after this `.env`, before Jake's estate fallbacks), so one
+  key serves everyone and is revoked in one place. The installer needs the repo readable.
 - **Connected or not is two lines in `.env`** (`POSTER_URL`, `POSTER_TOKEN`, minted per
   computer in the app's Settings). Without them approve only saves to Dropbox, as before.
   The token can add videos as its user and nothing else.

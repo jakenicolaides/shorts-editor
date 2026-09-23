@@ -71,18 +71,34 @@ def _timeline(words, gap_mark=1.5):
 
 
 def _ensure_key():
+    """The key in this editor's .env wins; else the shared one the posting app hands
+    to any editor token (set once under its Settings, so a new Mac pastes nothing but
+    the two POSTER_ lines); else, on Jake's Mac only, the estate's other env files."""
     import os
     if os.environ.get("ANTHROPIC_API_KEY"):
         return
     from pathlib import Path
-    for f in (Path(__file__).resolve().parent.parent / ".env",
-              Path.home() / "Documents/unseen_server/srv/www/sites/twixt.games/.env.local",
-              Path.home() / "Documents/unseen_server/srv/www/sites/prospector.unseenforms.com/.env.server"):
+
+    def from_file(f):
         if f.exists():
             for line in f.read_text().splitlines():
                 if line.startswith("ANTHROPIC_API_KEY=") and line.split("=", 1)[1].strip():
-                    os.environ["ANTHROPIC_API_KEY"] = line.split("=", 1)[1].strip()
-                    return
+                    return line.split("=", 1)[1].strip()
+    key = from_file(Path(__file__).resolve().parent.parent / ".env")
+    if not key:
+        from . import poster
+        if poster.enabled():
+            try:
+                key = poster.ping().get("anthropic_key") or None
+            except Exception:
+                key = None
+    for f in (Path.home() / "Documents/unseen_server/srv/www/sites/twixt.games/.env.local",
+              Path.home() / "Documents/unseen_server/srv/www/sites/prospector.unseenforms.com/.env.server"):
+        if key:
+            break
+        key = from_file(f)
+    if key:
+        os.environ["ANTHROPIC_API_KEY"] = key
 
 
 def decide(note: str, words: list, params: dict, cut: dict, history: list, duration: float) -> EditDecision:

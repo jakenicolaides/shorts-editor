@@ -45,22 +45,19 @@ or from the command line:
 
 ## Setup (a new Mac)
 
-Needs an Apple Silicon Mac (Whisper runs on MLX) and Homebrew.
+Needs an Apple Silicon Mac. In Terminal:
 
-    brew install python@3.13 ffmpeg
-    git clone <this repo> ~/Documents/shorts-editor && cd ~/Documents/shorts-editor
-    /opt/homebrew/bin/python3.13 -m venv .venv && .venv/bin/pip install -r requirements.txt
-    cp .env.example .env
+    curl -fsSL https://shorts.unseenforms.com/install.sh | bash
 
-Then in `.env`: `ANTHROPIC_API_KEY` (given to you; used for the notes editor and for
-reading the puzzle off a frame), and the two `POSTER_` lines from the posting app
-(Settings > your row > Editor token, minted once per computer). `ARCHIVE_DIR` stays
-empty unless this Mac has the shared Dropbox.
+It installs what is missing (Homebrew, Python, ffmpeg), fetches the editor, asks
+you to paste the two lines from To post > Settings > your row > Editor token,
+downloads the speech model and puts "Shorts Editor" in your Applications folder.
+Run the same line again to update. The Anthropic key comes from the posting app;
+`ARCHIVE_DIR` in `.env` stays empty unless this Mac has the shared Dropbox.
 
-    .venv/bin/python run.py         # opens http://localhost:8790
-
-The first run downloads the Whisper model (about 1.5 GB), so the first clip takes a
-few minutes longer.
+By hand, the same thing is: `brew install python@3.13 ffmpeg`, clone, `python3.13 -m venv
+.venv && .venv/bin/pip install -r requirements.txt`, `cp .env.example .env` and fill in
+the two `POSTER_` lines, then `.venv/bin/python run.py` (http://localhost:8790).
 
 ## The rules (shorts_editor/cutlist.py)
 
