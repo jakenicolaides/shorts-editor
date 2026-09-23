@@ -9,12 +9,8 @@
   body { font: 15px/1.4 -apple-system, system-ui, sans-serif; margin: 0; padding: 20px; max-width: 1100px; margin-inline: auto; }
   h1 { font-size: 20px; margin: 0 0 16px; }
   .intake { border: 1px solid rgba(127,127,127,.35); border-radius: 12px; padding: 16px; }
-  .steps { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; font-size: 13px; }
-  .steps span { padding: 3px 10px; border-radius: 10px; background: rgba(127,127,127,.15); }
-  .steps span.done { background: #2a7; color: #fff; cursor: pointer; }
-  .steps span.cur { outline: 2px solid #2a7; }
-  .step > label { display: block; font-weight: 600; margin-bottom: 8px; }
-  .step small { color: #888; }
+  .intake small { display: block; margin-top: 8px; color: #888; }
+  .speeds button { padding: 2px 8px; font-size: 13px; }
   .choices button.picked { background: #2a7; color: #fff; border-color: #2a7; }
   .drop { border: 2px dashed #999; border-radius: 12px; padding: 28px; text-align: center; color: #666; cursor: pointer; }
   .drop.over { border-color: #2a7; color: #2a7; }
@@ -22,6 +18,7 @@
   select, input[type=number], button, textarea { font: inherit; padding: 6px 10px; border-radius: 8px; border: 1px solid #aaa; background: transparent; color: inherit; }
   button.primary { background: #2a7; color: #fff; border-color: #2a7; }
   button:disabled { opacity: .5; }
+  button.danger { color: #e74; border-color: #e74; margin-left: auto; }
   .jobs { display: grid; grid-template-columns: 320px 1fr; gap: 20px; margin-top: 24px; }
   @media (max-width: 800px) { .jobs { grid-template-columns: 1fr; } }
   .list a { display: block; padding: 8px 10px; border-radius: 8px; text-decoration: none; color: inherit; }
@@ -45,29 +42,9 @@
 <h1>Shorts editor</h1>
 
 <div class="intake" id="intake">
-  <div class="steps" id="steps"></div>
-  <div class="step" id="step-name">
-    <label>1. Name the video</label>
-    <div class="row"><input type="text" id="title" placeholder="2026-09-14 aye-hassle" style="width:260px"> <button class="primary" id="next-name">Next</button></div>
-    <small>Date plus the puzzle. This becomes the file name in Dropbox.</small>
-  </div>
-  <div class="step" id="step-game" hidden>
-    <label>2. Which game?</label>
-    <div class="row choices" data-key="game">
-      <button data-val="twixtle">Twixtle</button><button data-val="vowelsweeper">Vowelsweeper</button><button data-val="auto">Work it out from the solve sound</button>
-    </div>
-  </div>
-  <div class="step" id="step-speed" hidden>
-    <label>3. Speed</label>
-    <div class="row choices" data-key="speed">
-      <button data-val="1.0">1.0x</button><button data-val="1.1">1.1x</button><button data-val="1.15">1.15x</button><button data-val="1.2">1.2x</button><button data-val="1.3">1.3x</button><button data-val="1.5">1.5x</button>
-    </div>
-  </div>
-  <div class="step" id="step-file" hidden>
-    <label>4. The raw clip</label>
-    <div class="drop" id="drop">Drop it here, or click to choose</div>
-    <input type="file" id="file" accept="video/*" hidden>
-  </div>
+  <div class="drop" id="drop">Drop the raw clip here, or click to choose</div>
+  <input type="file" id="file" accept="video/*" hidden>
+  <small>That is all: the game and the name are worked out from the clip, and it is cut at 1.0x. Change the speed or the name on the job afterwards.</small>
   <span id="upmsg" style="color:#e74"></span>
 </div>
 
@@ -80,38 +57,6 @@
 const $ = s => document.querySelector(s);
 let sel = null, jobs = [];
 
-const intake = { title: '', game: null, speed: null };
-const STEPS = ['name', 'game', 'speed', 'file'];
-let step = 0;
-
-function resetIntake() {
-  intake.title = ''; intake.game = null; intake.speed = null; step = 0;
-  $('#title').value = new Date().toISOString().slice(0, 10) + ' ';
-  document.querySelectorAll('.choices button').forEach(b => b.classList.remove('picked'));
-  showStep();
-}
-function nameOk(t) { return t.length > 11 && !/^\d{4}-\d{2}-\d{2}$/.test(t); }
-function showStep() {
-  STEPS.forEach((k, i) => { $('#step-' + k).hidden = i !== step; });
-  const labels = ['Name' + (intake.title ? ': ' + intake.title : ''), 'Game' + (intake.game ? ': ' + intake.game : ''),
-                  'Speed' + (intake.speed ? ': ' + intake.speed + 'x' : ''), 'Clip'];
-  $('#steps').innerHTML = labels.map((l, i) => `<span class="${i < step ? 'done' : ''} ${i === step ? 'cur' : ''}" data-i="${i}">${l}</span>`).join('');
-  document.querySelectorAll('.steps span.done').forEach(sp => sp.onclick = () => { step = +sp.dataset.i; showStep(); });
-  $('#upmsg').textContent = '';
-  if (step === 0) $('#title').focus();
-}
-$('#next-name').onclick = () => {
-  const t = $('#title').value.trim();
-  if (!nameOk(t)) { $('#upmsg').textContent = 'Add the puzzle after the date, e.g. 2026-09-14 aye-hassle'; $('#title').focus(); return; }
-  intake.title = t; step = 1; showStep();
-};
-$('#title').addEventListener('keydown', e => { if (e.key === 'Enter') $('#next-name').click(); });
-document.querySelectorAll('.choices').forEach(box => {
-  box.querySelectorAll('button').forEach(btn => btn.onclick = () => {
-    box.querySelectorAll('button').forEach(b => b.classList.remove('picked')); btn.classList.add('picked');
-    intake[box.dataset.key] = btn.dataset.val; step += 1; showStep();
-  });
-});
 $('#drop').onclick = () => $('#file').click();
 $('#file').onchange = e => { if (e.target.files[0]) upload(e.target.files[0]); };
 ['dragenter','dragover'].forEach(ev => $('#drop').addEventListener(ev, e => { e.preventDefault(); $('#drop').classList.add('over'); }));
@@ -119,16 +64,14 @@ $('#file').onchange = e => { if (e.target.files[0]) upload(e.target.files[0]); }
 $('#drop').addEventListener('drop', e => { const f = e.dataTransfer.files[0]; if (f) upload(f); });
 
 function upload(file) {
-  if (!nameOk(intake.title) || !intake.game || !intake.speed) { step = 0; showStep(); $('#upmsg').textContent = 'Finish the steps first'; return; }
-  const q = new URLSearchParams({ name: file.name, speed: intake.speed, game: intake.game, title: intake.title });
+  const q = new URLSearchParams({ name: file.name });
   const xhr = new XMLHttpRequest();
   xhr.open('PUT', '/upload?' + q);
   xhr.upload.onprogress = e => { $('#upmsg').textContent = 'uploading ' + Math.round(100 * e.loaded / e.total) + '%'; };
-  xhr.onload = () => { const r = JSON.parse(xhr.responseText); if (r.error) { $('#upmsg').textContent = r.error; return; } sel = r.id; resetIntake(); refresh(); };
+  xhr.onload = () => { const r = JSON.parse(xhr.responseText); if (r.error) { $('#upmsg').textContent = r.error; return; } $('#upmsg').textContent = ''; $('#file').value = ''; sel = r.id; refresh(); };
   xhr.onerror = () => { $('#upmsg').textContent = 'upload failed'; };
   xhr.send(file);
 }
-resetIntake();
 // keep the server alive while this page is open; it quits when the pings stop
 setInterval(() => fetch('/ping').catch(() => {}), 5000);
 fetch('/ping').catch(() => {});
@@ -148,10 +91,13 @@ async function refresh() {
   if (sel) showDetail();
 }
 
+const SPEEDS = [1.0, 1.1, 1.15, 1.2, 1.3, 1.5];
 let shownJob = null, shownVersion = null, shownSig = null;
 async function showDetail() {
-  const j = await (await fetch('/jobs/' + sel)).json();
-  const st = j.status || {}, side = j.sidecar || {}, cut = side.cut || {}, busy = !['review','failed','approved','new'].includes(st.stage);
+  const r = await fetch('/jobs/' + sel);
+  if (r.status === 404) { clearDetail(); return; }  // deleted
+  const j = await r.json();
+  const st = j.status || {}, side = j.sidecar || {}, cut = side.cut || {}, busy = !['review','failed','cancelled','approved','new'].includes(st.stage);
   const ver = (j.meta || {}).version || 0;
   const el = $('#detail');
   // The player lives in its own box and is only replaced when a new render lands,
@@ -164,9 +110,11 @@ async function showDetail() {
     $('#vidbox').innerHTML = ver ? `<video id="v" controls playsinline preload="metadata" src="/jobs/${sel}/video?v=${ver}"></video>` : `<div style="color:#888">Rendering...</div>`;
     shownVersion = ver;
   }
-  const sig = JSON.stringify([st.stage, st.progress, (st.log || []).length, (j.history || []).length, j.meta.saved_to, cut.final_duration]);
+  const sig = JSON.stringify([(side.params || {}).speed, st.stage, st.progress, (st.log || []).length, (j.history || []).length, j.meta.saved_to, (j.meta.scheduled || {}).due_at, (j.meta.scheduled || {}).version, j.meta.too_large, cut.final_duration, j.meta.title, j.meta.title_suggested]);
   if (sig !== shownSig) {
     const noteDraft = el.querySelector('#note') ? el.querySelector('#note').value : '';
+    const ttlDraft = el.querySelector('#ttl') && el.querySelector('#ttl').value !== el.querySelector('#ttl').defaultValue ? el.querySelector('#ttl').value : (j.meta.title || '');
+    const named = (j.meta.title || '').length > 11;
     const openSections = [...el.querySelectorAll('details[open]')].map(d => d.dataset.k);
     $('#info').innerHTML = `
         <div><b>${j.meta.title || j.meta.name}</b> <small>${j.meta.title ? j.meta.name : ''}</small> · ${st.stage} ${busy ? '(working)' : ''}</div>
@@ -176,16 +124,27 @@ async function showDetail() {
           <span>final length</span><span>${fmt(cut.final_duration)} (${cut.keep.length} segments, ${fmt(cut.source_kept)} of ${fmt((side.probe||{}).duration)} kept)</span>
           <span>solve</span><span>${side.solve && side.solve.at != null ? fmt(side.solve.at) + ' (' + side.solve.game + ', score ' + side.solve.score + ')' : 'not detected'}</span>
           <span>loudness</span><span>${side.loudness_out ? side.loudness_out.input_i + ' LUFS, peak ' + side.loudness_out.input_tp + ' dBTP' : ''}</span>
-          <span>speed</span><span>${(side.params||{}).speed}x · gap ${(side.params||{}).max_gap}s</span>
+          <span>gap</span><span>${(side.params||{}).max_gap}s</span>
+        </div>
+        <div class="row choices speeds"><span style="color:#888;font-size:13px">speed</span>
+          ${SPEEDS.map(v => `<button data-speed="${v}" class="${+(side.params||{}).speed === v ? 'picked' : ''}" ${busy ? 'disabled' : ''}>${v}x</button>`).join('')}
+          ${SPEEDS.includes(+(side.params||{}).speed) ? '' : `<button class="picked" disabled>${(side.params||{}).speed}x</button>`}
         </div>` : ''}
+        ${!named && !busy ? `<div class="hist" style="border-color:#e74"><b>No name yet</b>${esc(j.meta.title_why ? 'Could not work it out from the clip: ' + j.meta.title_why + '.' : '')} Type it below (date, puzzle, daily or hard) to save.</div>` : ''}
+        ${j.meta.title_suggested ? `<div class="hist" style="border-color:#27c"><b>The schedule has this puzzle as: ${esc(j.meta.title_suggested)}</b><button id="use-sugg" ${busy ? 'disabled' : ''}>Use this name</button></div>` : ''}
+        <div class="row"><input type="text" id="ttl" value="${esc(ttlDraft)}" placeholder="2026-09-14 aye-hassle daily" style="width:260px" ${busy ? 'disabled' : ''}> <button id="ttl-save" ${busy ? 'disabled' : ''}>Rename</button></div>
         ${j.meta.saved_to ? `<div class="hist" style="border-color:#27c"><b>Saved to Dropbox</b>${esc(j.meta.saved_to.replace(/^.*CloudStorage\/Dropbox\//, 'Dropbox/'))}</div>` : ''}
+        ${j.meta.too_large ? `<div class="hist" style="border-color:#e74"><b>Too large for the phone to share</b>Chrome caps shared files at 50 MB. Press Re-render: new renders are capped under it.</div>` : ''}
+        ${j.meta.scheduled ? `<div class="hist" style="border-color:${j.meta.scheduled.version === ver ? '#27c' : '#e74'}"><b>${j.meta.scheduled.version === ver ? 'Scheduled to post' : 'Scheduled, but that was an earlier render'}</b>${new Date(j.meta.scheduled.due_at) <= new Date() ? 'It is due now: it is on the phone.' : 'Due ' + new Date(j.meta.scheduled.due_at).toLocaleString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' }) + '.'}${j.meta.scheduled.version === ver ? '' : ' Approve again to replace it with this one.'}</div>` : ''}
         <h3 style="margin:16px 0 6px">Notes to the editor</h3>
         ${(j.history || []).map(h => `<div class="hist"><b>You: ${esc(h.note)}</b>Editor: ${esc(h.reply)}</div>`).join('')}
         <textarea id="note" placeholder="e.g. too choppy in the middle, and end a bit later after the solve" ${busy ? 'disabled' : ''}>${esc(noteDraft)}</textarea>
         <div class="row">
           <button id="send" ${busy ? 'disabled' : ''}>Send note</button>
-          <button id="rerun" ${busy ? 'disabled' : ''}>Re-render</button>
-          <button id="approve" class="primary" ${busy || !ver ? 'disabled' : ''}>${j.meta.saved_to ? 'Save to Dropbox again' : 'Save to Dropbox'}</button>
+          <button id="rerun" ${busy ? 'disabled' : ''}>${ver ? 'Re-render' : 'Try again'}</button>
+          <button id="approve" class="primary" ${busy || !ver || !named ? 'disabled' : ''}>${j.poster ? (j.meta.scheduled ? 'Approve again (replaces it)' : 'Approve: save and schedule') : (j.meta.saved_to ? 'Save to Dropbox again' : 'Save to Dropbox')}</button>
+          ${busy && st.stage !== 'saving' ? '<button id="cancel">Cancel</button>' : ''}
+          <button id="delete" class="danger">Delete</button>
         </div>
         <details data-k="log"><summary>Log</summary><pre>${(st.log || []).join('\n')}</pre></details>
         <details data-k="cuts"><summary>Cut list</summary><pre>${(cut.keep || []).map(([s,e]) => fmt(s) + ' - ' + fmt(e)).join('\n')}</pre></details>`;
@@ -195,23 +154,42 @@ async function showDetail() {
       if (await post('/jobs/' + sel + '/note', { note: n })) { $('#note').value = ''; } };
     $('#rerun').onclick = () => post('/jobs/' + sel + '/rerun');
     $('#approve').onclick = () => post('/jobs/' + sel + '/approve');
+    el.querySelectorAll('[data-speed]').forEach(b => b.onclick = () => { if (!b.classList.contains('picked')) post('/jobs/' + sel + '/speed', { speed: +b.dataset.speed }); });
+    $('#ttl').defaultValue = j.meta.title || '';
+    $('#ttl-save').onclick = () => post('/jobs/' + sel + '/title', { title: $('#ttl').value.trim() });
+    $('#ttl').addEventListener('keydown', e => { if (e.key === 'Enter') $('#ttl-save').click(); });
+    if ($('#use-sugg')) $('#use-sugg').onclick = () => post('/jobs/' + sel + '/title', { title: j.meta.title_suggested });
+    if ($('#cancel')) $('#cancel').onclick = () => post('/jobs/' + sel + '/cancel');
+    $('#delete').onclick = async () => {
+      const what = (busy ? 'Stop and delete' : 'Delete') + ' "' + (j.meta.title || j.meta.name) + '"?\n\nThis removes the raw copy, the transcript and the render from this Mac.'
+        + (j.meta.saved_to ? ' The copy saved to Dropbox stays.' : ' It has not been saved to Dropbox.');
+      if (!confirm(what)) return;
+      if (await post('/jobs/' + sel, null, 'DELETE')) clearDetail();
+    };
   }
   if (busy) setTimeout(showDetail, 1500);
 }
-async function post(path, body) {
+function clearDetail() {
+  sel = null; shownJob = null;
+  $('#detail').innerHTML = '<p style="color:#888">Pick a job.</p>';
+  refresh();
+}
+async function post(path, body, method) {
   let r;
-  try { r = await fetch(path, { method: 'POST', body: body ? JSON.stringify(body) : null }); }
+  try { r = await fetch(path, { method: method || 'POST', body: body ? JSON.stringify(body) : null }); }
   catch (e) { alert('The server is not responding. Restart Shorts Editor.'); return false; }
   if (!r.ok) {
-    const msg = r.status === 404 ? 'This button needs a newer server: close the Terminal window and open Shorts Editor again.' : ((await r.json().catch(() => ({}))).error || ('Failed: ' + r.status));
-    alert(msg); return false;
+    const err = (await r.json().catch(() => ({}))).error;
+    const stale = r.status === 501 || (r.status === 404 && err !== 'no such job');  // a route this server does not have
+    alert(stale ? 'This button needs a newer server: close the Terminal window and open Shorts Editor again.' : (err || ('Failed: ' + r.status)));
+    return false;
   }
   shownSig = null; refresh(); return true;
 }
 function fmt(s) { if (s == null) return '?'; s = Math.round(s); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); }
-function esc(s) { return String(s || '').replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+function esc(s) { return String(s || '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 refresh();
-setInterval(() => { if (!sel || !document.querySelector('#note') || document.activeElement.id !== 'note') refresh(); }, 4000);
+setInterval(() => { if (!sel || !document.querySelector('#note') || !['note', 'ttl'].includes(document.activeElement.id)) refresh(); }, 4000);
 </script>
 </body>
 </html>

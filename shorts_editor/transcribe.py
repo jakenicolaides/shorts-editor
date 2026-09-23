@@ -4,11 +4,14 @@ Output shape (transcript.json):
   {"words": [{"w": "hello", "s": 1.23, "e": 1.61, "filler": false}, ...],
    "text": "...", "model": "..."}
 """
+import os
 import re
+import sys
 import json
-import subprocess
 import tempfile
 from pathlib import Path
+
+from .cancel import Token
 
 MODEL = "mlx-community/whisper-large-v3-turbo"
 
@@ -21,13 +24,19 @@ def is_filler(word: str) -> bool:
     return bool(w) and bool(FILLER_RE.match(w))
 
 
-def extract_audio(src: Path, dst: Path, rate: int = 16000) -> Path:
-    """Mono 16k wav for whisper + tone matching."""
-    subprocess.run(
-        ["ffmpeg", "-y", "-v", "error", "-i", str(src), "-vn", "-ac", "1", "-ar", str(rate),
-         "-c:a", "pcm_s16le", str(dst)],
-        check=True,
-    )
+def extract_audio(src: Path, dst: Path, rate: int = 16000, token: Token = None) -> Path:
+    """Mono 16k wav for whisper + tone matching. Written beside dst and moved into
+    place, so a cancelled extract never leaves a short wav that looks finished."""
+    tmp = dst.with_name(dst.stem + ".tmp.wav")
+    try:
+        (token or Token()).run(
+            ["ffmpeg", "-y", "-v", "error", "-i", str(src), "-vn", "-ac", "1", "-ar", str(rate),
+             "-c:a", "pcm_s16le", str(tmp)],
+            check=True,
+        )
+        os.replace(tmp, dst)
+    finally:
+        tmp.unlink(missing_ok=True)
     return dst
 
 
@@ -82,13 +91,19 @@ def transcribe(audio_wav: Path, model: str = MODEL) -> dict:
             "dropped_silent": n - len(words)}
 
 
-if __name__ == "__main__":
-    import sys
-    src = Path(sys.argv[1])
-    with tempfile.TemporaryDirectory() as td:
-        wav = extract_audio(src, Path(td) / "a.wav")
-        t = transcribe(wav)
-    print(json.dumps(t, indent=1))
+def transcribe_killable(audio_wav: Path, out_json: Path, token: Token) -> dict:
+    """transcribe() in a child interpreter: a thread running Whisper cannot be
+    stopped, a process can. Costs a model load per job (a few seconds)."""
+    tmp = out_json.with_name(out_json.stem + ".tmp.json")
+    try:
+        r = token.run([sys.executable, "-m", "shorts_editor.transcribe", str(audio_wav), str(tmp)],
+                      cwd=str(Path(__file__).resolve().parent.parent))
+        if r.returncode:
+            raise RuntimeError("transcription failed:\n" + r.stderr[-2000:])
+        os.replace(tmp, out_json)
+    finally:
+        tmp.unlink(missing_ok=True)
+    return json.loads(out_json.read_text())
 
 
 def frame_db(audio_wav: Path, frame_ms: int = 10):
@@ -137,3 +152,18 @@ def snap_end(db, dt, t, max_fwd=0.8):
             i -= 1
         i -= 1
     return (i + 1) * dt
+
+
+if __name__ == "__main__":
+    # <clip>            transcribe a clip and print the JSON
+    # <wav> <out.json>  what transcribe_killable runs
+    from ._env import clean_dyld
+    clean_dyld()
+    src = Path(sys.argv[1])
+    if len(sys.argv) > 2:
+        Path(sys.argv[2]).write_text(json.dumps(transcribe(src), indent=1))
+    else:
+        with tempfile.TemporaryDirectory() as td:
+            wav = extract_audio(src, Path(td) / "a.wav")
+            t = transcribe(wav)
+        print(json.dumps(t, indent=1))

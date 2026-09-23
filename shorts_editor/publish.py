@@ -1,6 +1,7 @@
-"""Save to Dropbox: the approved final goes to the game's folder under the name
-typed at upload, with its sidecar JSON beside it. The phone picks it up from
-Dropbox. Config from .env (see .env.example)."""
+"""Approve: the final goes to the game's Dropbox folder under the job's name, with
+its sidecar JSON beside it (the archive), and, when this editor is connected to
+the posting app (poster.py), is uploaded and scheduled there for the phone.
+Config from .env (see .env.example)."""
 import json
 import os
 import shutil
@@ -42,8 +43,14 @@ def final_name(job) -> str:
     return (safe or f"{job.id[:10]}-{job_game(job)}") + ".mp4"
 
 
-def archive(job, cfg) -> Path:
-    base = Path(cfg.get("ARCHIVE_DIR") or (Path.home() / "Library/CloudStorage/Dropbox"))
+def archive(job, cfg):
+    """Copy the final into the archive folder. None when there is no archive here:
+    ARCHIVE_DIR unset and no Dropbox on this Mac (a colleague's machine). The posting
+    app holds the copy that matters then, and inventing a Dropbox folder would be worse."""
+    default = Path.home() / "Library/CloudStorage/Dropbox"
+    if not cfg.get("ARCHIVE_DIR") and not default.exists():
+        return None
+    base = Path(cfg.get("ARCHIVE_DIR") or default)
     dst_dir = base / GAME_FOLDERS.get(job_game(job), "shorts")
     try:
         dst_dir.mkdir(parents=True, exist_ok=True)
@@ -59,14 +66,42 @@ def archive(job, cfg) -> Path:
 
 
 def approve(job):
+    """Dropbox first, then the schedule: the archive copy must not depend on a
+    server being up. Both halves overwrite, so pressing the button again after a
+    failure (or after a re-edit) is always the fix."""
+    from . import poster
+    from .cancel import Cancelled
     try:
-        job.set(stage="saving", msg="saving to Dropbox")
+        if poster.enabled():   # a name the schedule cannot use is refused before anything is saved under it
+            poster.puzzle_from_name(job.meta.get("title") or "", job_game(job))
+            from . import render
+            size = (job.dir / "out.mp4").stat().st_size
+            if size > render.SHARE_LIMIT:
+                raise RuntimeError(f"this render is {size / 1e6:.0f} MB and the phone can only share files under "
+                                   f"{render.SHARE_LIMIT / 1e6:.0f} MB: press Re-render (new renders are capped), then Approve")
+        job.set(stage="saving", progress=5, msg="saving to Dropbox")
         path = archive(job, env())
         meta = job.meta
-        meta["saved_to"] = str(path)
-        job._write_meta(meta)
-        job.set(stage="approved", progress=100, msg=f"saved to {path}")
+        if path:
+            meta["saved_to"] = str(path)
+            job._write_meta(meta)
+            job.set(msg=f"saved to {path}")
+        else:
+            job.set(msg="no archive folder on this Mac (ARCHIVE_DIR unset, no Dropbox): not archived")
+        if poster.enabled():
+            job.set(stage="scheduling", progress=10, msg="uploading to the posting app")
+            cut = json.loads((job.dir / "cut.json").read_text())
+            res = poster.schedule(job.dir / "out.mp4", meta.get("title") or "", job_game(job), cut.get("final_duration", 0),
+                                  token=job.token, on_progress=lambda f: job.set(progress=10 + int(85 * f)))
+            meta = job.meta
+            meta["scheduled"] = {**res, "version": meta.get("version")}
+            job._write_meta(meta)
+            job.set(msg=("replaced the earlier upload; " if res["replaced"] else "") +
+                        ("scheduled: it is already due" if res["due_now"] else f"scheduled for {res['due_at']}"))
+        job.set(stage="approved", progress=100)
         return path
+    except Cancelled:
+        job.set(stage="review", progress=100, msg="upload cancelled: the Dropbox copy is saved, nothing was scheduled")
     except Exception as e:
-        job.set(stage="failed", error=str(e), msg="save failed: " + str(e))
+        job.set(stage="failed", error=str(e), msg="approve failed: " + str(e))
         raise

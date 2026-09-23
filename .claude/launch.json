@@ -4,8 +4,20 @@
     {
       "name": "shorts-editor",
       "runtimeExecutable": ".venv/bin/python",
-      "runtimeArgs": ["-m", "shorts_editor.server"],
+      "runtimeArgs": [
+        "-m",
+        "shorts_editor.server"
+      ],
       "port": 8790
+    },
+    {
+      "name": "poster-dev",
+      "runtimeExecutable": "/bin/sh",
+      "runtimeArgs": [
+        "-c",
+        "cd /Users/jakenicolaides/Documents/unseen_server/srv/www/sites/shorts.unseenforms.com && exec /opt/homebrew/bin/php -S localhost:8795 -t public"
+      ],
+      "port": 8795
     }
   ]
 }

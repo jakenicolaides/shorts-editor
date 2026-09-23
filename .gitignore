@@ -1,6 +1,7 @@
 .venv/
-fixtures/*.mp4
+fixtures/
 work/
 .env
 __pycache__/
 *.pyc
+.DS_Store

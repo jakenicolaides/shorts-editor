@@ -6,6 +6,15 @@ import re
 import subprocess
 from pathlib import Path
 
+from .cancel import Token
+
+# Chrome refuses to share a file over 50 MiB from a web page (blink kMaxSharedFileBytes), and the
+# phone app posts by sharing. Every render is capped under it: a video that cannot be shared is not
+# a video. The cap is on the file, so long takes get a lower bitrate rather than a refusal.
+SHARE_LIMIT = 50 * 1024 * 1024
+SIZE_TARGET = 44 * 1024 * 1024   # headroom for the container and the VBV overshooting a little
+AUDIO_KBPS = 192
+
 TARGET_I = -14.0
 TARGET_TP = -1.0
 TARGET_LRA = 11.0
@@ -51,27 +60,41 @@ def _graph(keep, speed, loud=None, video=True):
     return ";".join(parts)
 
 
-def measure_loudness(src: Path, keep, speed) -> dict:
+def measure_loudness(src: Path, keep, speed, token: Token = None) -> dict:
     """First loudnorm pass on the cut + sped audio only."""
     cmd = ["ffmpeg", "-hide_banner", "-nostats", "-i", str(src),
            "-filter_complex", _graph(keep, speed, None, video=False),
            "-map", "[aout]", "-f", "null", "-"]
-    r = subprocess.run(cmd, capture_output=True, text=True)
+    r = (token or Token()).run(cmd)
     m = re.search(r"\{[^{}]*\"input_i\"[^{}]*\}", r.stderr, re.S)
     if not m:
         raise RuntimeError("loudnorm measurement failed:\n" + r.stderr[-2000:])
     return json.loads(m.group(0))
 
 
-def render(src: Path, keep, speed, out: Path, loud: dict, crf: int = 18, on_progress=None) -> Path:
+def video_maxrate_kbps(duration_s: float) -> int:
+    """The video bitrate that lands the whole file at SIZE_TARGET for this length."""
+    total_kbps = SIZE_TARGET * 8 / max(duration_s, 1.0) / 1000
+    return int(max(total_kbps - AUDIO_KBPS, 600))
+
+
+def render(src: Path, keep, speed, out: Path, loud: dict, crf: int = 18, on_progress=None, token: Token = None) -> Path:
+    duration = sum(e - s_ for s_, e in keep) / max(speed, 0.01)
+    maxrate = video_maxrate_kbps(duration)
     cmd = ["ffmpeg", "-y", "-hide_banner", "-nostats", "-progress", "pipe:1", "-i", str(src),
            "-filter_complex", _graph(keep, speed, loud, video=True),
            "-map", "[vout]", "-map", "[aout]",
            "-c:v", "libx264", "-preset", "medium", "-crf", str(crf), "-profile:v", "high",
            "-level", "4.2", "-pix_fmt", "yuv420p", "-movflags", "+faststart",
-           "-c:a", "aac", "-b:a", "192k", "-ar", "48000",
+           # CRF quality up to a ceiling: the VBV cap is what keeps the file under SHARE_LIMIT.
+           "-maxrate", f"{maxrate}k", "-bufsize", f"{maxrate * 2}k",
+           # A keyframe every two seconds (Instagram's own encodes do the same); x264's default is one per
+           # 250 frames, 4.2s at 60fps. Every second was tried (2026-09-21) and doubled the file size.
+           "-force_key_frames", "expr:gte(t,n_forced*2)",
+           "-c:a", "aac", "-b:a", f"{AUDIO_KBPS}k", "-ar", "48000",
            str(out)]
-    p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    token = token or Token()
+    p = token.popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     for line in p.stdout:
         if on_progress and line.startswith("out_time_us="):
             try:
@@ -79,7 +102,9 @@ def render(src: Path, keep, speed, out: Path, loud: dict, crf: int = 18, on_prog
             except ValueError:
                 pass
     err = p.stderr.read()
-    if p.wait() != 0:
+    code = p.wait()
+    token.check()
+    if code != 0:
         raise RuntimeError("render failed:\n" + err[-3000:])
     return out
 
@@ -96,9 +121,8 @@ def probe(src: Path) -> dict:
     return info
 
 
-def measure_output_loudness(path: Path) -> dict:
-    r = subprocess.run(["ffmpeg", "-hide_banner", "-nostats", "-i", str(path),
-                        "-af", "loudnorm=print_format=json", "-f", "null", "-"],
-                       capture_output=True, text=True)
+def measure_output_loudness(path: Path, token: Token = None) -> dict:
+    r = (token or Token()).run(["ffmpeg", "-hide_banner", "-nostats", "-i", str(path),
+                                "-af", "loudnorm=print_format=json", "-f", "null", "-"])
     m = re.search(r"\{[^{}]*\"input_i\"[^{}]*\}", r.stderr, re.S)
     return json.loads(m.group(0)) if m else {}

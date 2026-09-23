@@ -2,12 +2,18 @@
 
   GET  /                      the page
   GET  /jobs                  job list (json)
-  PUT  /upload?name=&speed=&game=&title=   raw file body -> starts a job
+  PUT  /upload?name=           raw file body -> starts a job. That is the whole intake: the game and
+                              the name are worked out from the clip, speed is 1.0 until changed on the
+                              job (&speed= &game= &title= still override, for scripts)
   GET  /jobs/<id>             status + sidecar (json)
   GET  /jobs/<id>/video       current render (range requests supported)
   POST /jobs/<id>/note        {"note": "..."}  -> editor loop, re-render
-  POST /jobs/<id>/approve     save the final to Dropbox (publish.py)
-  POST /jobs/<id>/rerun       re-cut + re-render with current params
+  POST /jobs/<id>/title       {"title": "..."} -> rename (the Dropbox file name)
+  POST /jobs/<id>/speed       {"speed": 1.2}   -> re-cut (the 1:30 floor is post-speed) + re-render
+  POST /jobs/<id>/approve     save the final to Dropbox and, when connected, schedule it in the posting app (publish.py)
+  POST /jobs/<id>/rerun       re-cut + re-render with current params (or pick a stopped first run back up)
+  POST /jobs/<id>/cancel      stop whatever is running on the job
+  DELETE /jobs/<id>           cancel if running, then remove work/<id>/ (the Dropbox copy stays)
 """
 import json
 import os
@@ -16,7 +22,7 @@ import threading
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 
-from . import pipeline
+from . import pipeline, poster
 
 ROOT = Path(__file__).resolve().parent.parent
 PAGE_FILE = ROOT / "shorts_editor" / "page.html"  # read per request so edits need no restart
@@ -30,11 +36,18 @@ def _lock(job_id):
     return _locks.setdefault(job_id, threading.Lock())
 
 
-def _run_bg(job_id, fn):
+def _run_bg(job, fn):
     def go():
-        with _lock(job_id):
+        with _lock(job.id):
+            if not job.exists():  # deleted before it started
+                return
+            job.begin()
             fn()
     threading.Thread(target=go, daemon=True).start()
+
+
+def _name_ok(title):
+    return len(title) > 11  # more than the date
 
 
 class H(BaseHTTPRequestHandler):
@@ -71,11 +84,13 @@ class H(BaseHTTPRequestHandler):
         if not m:
             return self._json({"error": "not found"}, 404)
         job = pipeline.Job(m.group(1))
+        if not job.exists():
+            return self._json({"error": "no such job"}, 404)
         if m.group(2):
             return self._video(job.dir / "out.mp4")
         side = pipeline._read(job.dir / "sidecar.json", {})
         return self._json({"id": job.id, "status": job.status(), "meta": job.meta, "sidecar": side,
-                           "history": pipeline._read(job.dir / "history.json", [])})
+                           "history": pipeline._read(job.dir / "history.json", []), "poster": poster.enabled()})
 
     def _video(self, path: Path):
         if not path.exists():
@@ -119,25 +134,64 @@ class H(BaseHTTPRequestHandler):
             import time
             _page["bye_at"] = time.time()
             return self._json({"ok": True})
-        m = re.match(r"^/jobs/([\w-]+)/(note|approve|rerun)$", self.path)
+        m = re.match(r"^/jobs/([\w-]+)/(note|title|speed|approve|rerun|cancel)$", self.path)
         if not m:
             return self._json({"error": "not found"}, 404)
         job = pipeline.Job(m.group(1))
+        if not job.exists():
+            return self._json({"error": "no such job"}, 404)
         n = int(self.headers.get("Content-Length") or 0)
         body = json.loads(self.rfile.read(n) or b"{}") if n else {}
         action = m.group(2)
+        if action == "cancel":
+            if not _lock(job.id).locked():
+                return self._json({"error": "nothing is running on this job"}, 409)
+            job.cancel()
+            return self._json({"ok": True})
         if _lock(job.id).locked():
             return self._json({"error": "job is busy"}, 409)
-        if action == "note":
+        if action == "title":
+            title = (body.get("title") or "").strip()
+            if not _name_ok(title):
+                return self._json({"error": "a name is date, puzzle, difficulty, e.g. 2026-09-14 aye-hassle daily"}, 400)
+            job.rename(title)
+        elif action == "speed":
+            try:
+                speed = round(float(body.get("speed")), 3)
+            except (TypeError, ValueError):
+                speed = 0
+            if not 0.5 <= speed <= 2.0:
+                return self._json({"error": "speed is between 0.5 and 2"}, 400)
+            if not (job.dir / "cut.json").exists():
+                return self._json({"error": "nothing to re-render yet: try again first"}, 409)
+            _run_bg(job, lambda: job.set_speed(speed))
+        elif action == "note":
             note = (body.get("note") or "").strip()
             if not note:
                 return self._json({"error": "empty note"}, 400)
-            _run_bg(job.id, lambda: job.apply_note(note))
+            _run_bg(job, lambda: job.apply_note(note))
         elif action == "rerun":
-            _run_bg(job.id, lambda: (job.recut(), job.rerender()))
+            _run_bg(job, job.rerun)
         elif action == "approve":
+            if not _name_ok(job.meta.get("title") or ""):
+                return self._json({"error": "name the video first: it becomes the file name in Dropbox"}, 400)
             from . import publish
-            _run_bg(job.id, lambda: publish.approve(job))
+            _run_bg(job, lambda: publish.approve(job))
+        return self._json({"ok": True})
+
+    def do_DELETE(self):
+        m = re.match(r"^/jobs/([\w-]+)$", self.path)
+        job = pipeline.Job(m.group(1)) if m else None
+        if not job or not job.exists():
+            return self._json({"error": "no such job"}, 404)
+        job.cancel()
+        lock = _lock(job.id)
+        if not lock.acquire(timeout=20):
+            return self._json({"error": "still stopping, try again in a moment"}, 409)
+        try:
+            job.delete()
+        finally:
+            lock.release()
         return self._json({"ok": True})
 
     def do_PUT(self):
@@ -150,8 +204,8 @@ class H(BaseHTTPRequestHandler):
         speed = float(q.get("speed", ["1.0"])[0])
         game = q.get("game", ["auto"])[0]
         title = unquote(q.get("title", [""])[0]).strip()
-        if len(title) <= 11:
-            return self._json({"error": "a name is required (date plus the puzzle)"}, 400)
+        if title and not _name_ok(title):
+            return self._json({"error": "a name is the date plus the puzzle (or leave it to be worked out from the clip)"}, 400)
         n = int(self.headers.get("Content-Length") or 0)
         if n <= 0:
             return self._json({"error": "empty body"}, 400)
@@ -168,11 +222,11 @@ class H(BaseHTTPRequestHandler):
                 remaining -= len(chunk)
         job = pipeline.Job.create(dst, speed, game, name=name, title=title)
         dst.unlink(missing_ok=True)
-        _run_bg(job.id, job.run)
+        _run_bg(job, job.run)
         return self._json({"id": job.id})
 
 
-BUSY_STAGES = {"queued", "audio", "transcribe", "solve", "cut", "loudness", "render", "editing", "saving"}
+BUSY_STAGES = {"queued", "audio", "transcribe", "solve", "title", "cut", "loudness", "render", "editing", "saving", "scheduling"}
 
 
 def _sweep_orphans():
