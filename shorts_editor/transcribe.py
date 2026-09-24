@@ -91,13 +91,27 @@ def transcribe(audio_wav: Path, model: str = MODEL) -> dict:
             "dropped_silent": n - len(words)}
 
 
-def transcribe_killable(audio_wav: Path, out_json: Path, token: Token) -> dict:
+_one_at_a_time = __import__("threading").Lock()   # Whisper: one model load, one GPU; overlapping runs gain nothing
+
+
+def transcribe_killable(audio_wav: Path, out_json: Path, token: Token, on_wait=None) -> dict:
     """transcribe() in a child interpreter: a thread running Whisper cannot be
-    stopped, a process can. Costs a model load per job (a few seconds)."""
+    stopped, a process can. Costs a model load per job (a few seconds). Jobs run in
+    parallel, but this step is taken in turn: several clips dropped together each
+    load the 1.5 GB model and share the one GPU, so overlapping them is no faster and
+    can run the machine out of memory. A cancel while waiting for the turn is honoured."""
     tmp = out_json.with_name(out_json.stem + ".tmp.json")
+    waited = False
+    while not _one_at_a_time.acquire(timeout=0.5):
+        token.check()
+        if not waited and on_wait:
+            on_wait(); waited = True
     try:
         r = token.run([sys.executable, "-m", "shorts_editor.transcribe", str(audio_wav), str(tmp)],
                       cwd=str(Path(__file__).resolve().parent.parent))
+    finally:
+        _one_at_a_time.release()
+    try:
         if r.returncode:
             raise RuntimeError("transcription failed:\n" + r.stderr[-2000:])
         os.replace(tmp, out_json)

@@ -163,7 +163,7 @@ class Job:
         tpath = self.dir / "transcript.json"
         if not tpath.exists():
             t0 = time.time()
-            t = transcribe.transcribe_killable(wav, tpath, tok)
+            t = transcribe.transcribe_killable(wav, tpath, tok, on_wait=lambda: self.set(msg="waiting for another clip's transcription to finish"))
             self.set(msg=f"transcribed {len(t['words'])} words in {time.time() - t0:.0f}s")
         self.set(stage="solve", progress=40)
 
