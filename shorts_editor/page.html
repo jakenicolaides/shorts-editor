@@ -100,13 +100,16 @@ function upload(file, onProgress) {
   });
 }
 // Prepare puzzles: one Chrome tab per scheduled puzzle for the next N days, via the posting app.
-let prepDepth = null;
+let prepDepth = null, prepStarts = {}, prepSkipped = [];
 function prepGames() { return [...document.querySelectorAll('.prep-game:checked')].map(c => c.value); }
 function prepCap() {
   if (!prepDepth) return;
   const gs = prepGames(), cap = gs.length ? Math.min(...gs.map(g => prepDepth[g] ?? 0)) : 0;
   const d = $('#prep-days'); d.max = Math.max(cap, 1); if (+d.value > cap) d.value = Math.max(cap, 1);
-  $('#prep-depth').textContent = Object.entries(prepDepth).map(([g, n]) => `${g}: ${n} day${n === 1 ? '' : 's'} queued from today`).join(' · ') + (cap ? '' : ' · nothing to open for this choice');
+  const when = d => { const dd = new Date(d + 'T12:00:00'), t = new Date(); t.setHours(12, 0, 0, 0); const diff = Math.round((dd - t) / 864e5); return diff === -1 ? 'yesterday' : diff === 0 ? 'today' : dd.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }); };
+  const lines = Object.entries(prepDepth).map(([g, n]) => `${g}: ${n} day${n === 1 ? '' : 's'} to record` + (prepStarts[g] ? `, starting ${when(prepStarts[g])}` : ''));
+  const skipped = (prepSkipped || []).filter(s => s.why === 'recorded').map(s => `${s.label}: already recorded`);
+  $('#prep-depth').textContent = lines.join(' · ') + (skipped.length ? ' · ' + skipped.join(', ') : '') + (cap ? '' : ' · nothing to open for this choice');
   $('#prep-go').disabled = !cap;
 }
 $('#prep-open').onclick = async () => {
@@ -117,7 +120,7 @@ $('#prep-open').onclick = async () => {
     const sel = $('#prep-profile'), saved = localStorage.getItem('prepProfile');
     sel.innerHTML = (r.profiles || []).map(p => `<option value="${esc(p.dir)}" ${p.dir === saved ? 'selected' : ''}>${esc(p.name)}</option>`).join('') || '<option value="">default</option>';
     if (r.error) { $('#prep-depth').textContent = r.error; $('#prep-go').disabled = true; return; }
-    prepDepth = r.depth;
+    prepDepth = r.depth; prepStarts = r.starts || {}; prepSkipped = r.skipped || [];
     prepCap();
   } catch (e) { $('#prep-depth').textContent = 'Could not reach the posting app'; }
 };

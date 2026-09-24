@@ -177,7 +177,7 @@ class H(BaseHTTPRequestHandler):
                 return self._json({"error": str(e)}, 502)
             if not body.get("dry"):   # dry: the test suite, which wants the list without a browser opening
                 prepare.open_in_chrome([l["url"] for l in r["links"]], body.get("profile") or None)
-            return self._json({"opened": [l["label"] for l in r["links"]], "depth": r["depth"], "from": r["from"]})
+            return self._json({"opened": [l["label"] for l in r["links"]], "depth": r["depth"], "starts": r.get("starts", {})})
         m = re.match(r"^/jobs/([\w-]+)/(note|title|speed|approve|rerun|cancel)$", self.path)
         if not m:
             return self._json({"error": "not found"}, 404)
