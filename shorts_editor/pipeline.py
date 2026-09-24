@@ -105,9 +105,15 @@ class Job:
     # ---- steps --------------------------------------------------------------
     @classmethod
     def create(cls, src: Path, speed: float, game: str, name: str = None, title: str = None) -> "Job":
-        job_id = datetime.now().strftime("%Y-%m-%d-%H%M%S")
+        # Ids are timestamps to the second, so several clips dropped together (their
+        # uploads finish within a second of each other) must not share one: on 2026-09-24
+        # four did, and one job ran four times over a mix of two clips' files.
+        base = datetime.now().strftime("%Y-%m-%d-%H%M%S")
+        job_id, n = base, 2
+        while (WORK / job_id).exists():
+            job_id, n = f"{base}-{n}", n + 1
         job = cls(job_id)
-        job.dir.mkdir(parents=True, exist_ok=True)
+        job.dir.mkdir(parents=True, exist_ok=False)
         dst = job.dir / ("input" + src.suffix.lower())
         shutil.copy2(src, dst)
         _write(job.dir / "meta.json", {
