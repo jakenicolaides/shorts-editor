@@ -15,6 +15,7 @@
   .prep table { border-collapse: collapse; font-size: 13px; }
   .prep th, .prep td { padding: 4px 10px 4px 0; text-align: left; vertical-align: top; white-space: nowrap; }
   .prep th { color: #888; font-weight: 600; }
+  .prep th small { display: block; font-weight: 400; }
   .prep td.day { color: inherit; font-weight: 600; }
   .prep td small { display: block; color: #888; font-weight: 400; }
   .prep td.off { color: #888; }
@@ -107,25 +108,22 @@ function upload(file, onProgress) {
 // Prepare puzzles: a checklist of every puzzle from yesterday on, labelled by when its video
 // POSTS (that is how the recording is planned), the sensible ones ticked; one Chrome tab per tick.
 let prepCands = [];
-function prepDayLabel(d) {
-  const dd = new Date(d + 'T12:00:00'), t = new Date(); t.setHours(12, 0, 0, 0);
-  const diff = Math.round((dd - t) / 864e5);
-  return (diff === -1 ? 'Yesterday' : diff === 0 ? 'Today' : diff === 1 ? 'Tomorrow' : dd.toLocaleDateString('en-GB', { weekday: 'short' })) + ' ' + dd.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
-}
-function prepDueLabel(iso) {
-  const due = new Date(iso), t = new Date(); t.setHours(12, 0, 0, 0); const dd = new Date(due); dd.setHours(12, 0, 0, 0);
-  const diff = Math.round((dd - t) / 864e5), when = diff === 0 ? 'today' : diff === 1 ? 'tomorrow' : dd.toLocaleDateString('en-GB', { weekday: 'short' });
-  return when + ' ' + due.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
-}
 function prepRender() {
-  const dates = [...new Set(prepCands.map(c => c.date))];
+  // Rows are POSTING days (the day the videos go out), which is how the recording is planned;
+  // the puzzle's own date is the day before and is not shown.
+  const dayOf = iso => { const d = new Date(iso); d.setHours(12, 0, 0, 0); return d; };
+  const key = iso => dayOf(iso).toISOString().slice(0, 10);
+  const days = [...new Set(prepCands.map(c => key(c.due_at)))].sort();
   const cols = [['twixtle', 'daily', 'Twixtle Daily'], ['twixtle', 'bonus', 'Twixtle Hard'], ['vowelsweeper', 'daily', 'Vowelsweeper Daily'], ['vowelsweeper', 'bonus', 'Vowelsweeper Hard']];
-  $('#prep-list').innerHTML = `<table><tr><th>Puzzle of</th>${cols.map(c => `<th>${c[2]}</th>`).join('')}</tr>` + dates.map(d => `<tr><td class="day">${prepDayLabel(d)}</td>` + cols.map(([g, t]) => {
-    const c = prepCands.find(x => x.game === g && x.track === t && x.date === d);
+  const slotTime = t => { const c = prepCands.find(x => x.track === t); return c ? new Date(c.due_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) : ''; };
+  const dayLabel = k => { const d = dayOf(k + 'T12:00:00Z'), t = new Date(); t.setHours(12, 0, 0, 0); const diff = Math.round((d - t) / 864e5);
+    return (diff === 0 ? 'Today' : diff === 1 ? 'Tomorrow' : d.toLocaleDateString('en-GB', { weekday: 'long' })) + '<small>' + d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) + '</small>'; };
+  $('#prep-list').innerHTML = `<table><tr><th>Posts on</th>${cols.map(([g, t, l]) => `<th>${l}<small>${slotTime(t)}</small></th>`).join('')}</tr>` + days.map(k => `<tr><td class="day">${dayLabel(k)}</td>` + cols.map(([g, t]) => {
+    const c = prepCands.find(x => x.game === g && x.track === t && key(x.due_at) === k);
     if (!c) return '<td class="off">not queued</td>';
-    const id = `${g}|${t}|${d}`;
-    if (c.status === 'posted') return `<td class="off">missed<small>posted ${prepDueLabel(c.due_at)}</small></td>`;
-    return `<td class="${c.status === 'recorded' ? 'rec' : ''}"><label><input type="checkbox" class="prep-pick" value="${id}" ${c.suggested ? 'checked' : ''}> ${c.status === 'recorded' ? 'again' : 'record'}</label><small>${c.status === 'recorded' ? 'recorded ✓ · ' : ''}posts ${prepDueLabel(c.due_at)}</small></td>`;
+    const id = `${g}|${t}|${c.date}`;
+    if (c.status === 'posted') return `<td class="off">missed<small>slot has passed</small></td>`;
+    return `<td class="${c.status === 'recorded' ? 'rec' : ''}"><label><input type="checkbox" class="prep-pick" value="${id}" ${c.suggested ? 'checked' : ''}> ${c.status === 'recorded' ? 'again' : 'record'}</label>${c.status === 'recorded' ? '<small>recorded ✓</small>' : ''}</td>`;
   }).join('') + '</tr>').join('') + '</table>';
   document.querySelectorAll('.prep-pick').forEach(c => c.onchange = prepCount);
   prepCount();
