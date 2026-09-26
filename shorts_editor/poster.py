@@ -130,6 +130,17 @@ def schedule(video: Path, name: str, game: str, duration_s: float, token: Token 
 
 
 
+def record_candidates(days: int = 8) -> list:
+    """Every puzzle from yesterday for `days` days with its standing, for the checklist:
+    [{"game", "track", "date", "due_at", "status": wanted|recorded|posted, "suggested", "label"}]."""
+    return _call(config(), "/api/editor/record-links.php", {"mode": "list", "days": int(days)})["candidates"]
+
+
+def record_open(picks: list) -> list:
+    """Signed links for exactly these [{"game", "track", "date"}], in date order."""
+    return _call(config(), "/api/editor/record-links.php", {"mode": "open", "picks": list(picks)})["links"]
+
+
 def record_links(days: int, games: list, probe_only: bool = False) -> dict:
     """Signed links that open scheduled puzzles for recording, from the posting app
     (which shares a secret with the games). {"from", "depth": {game: days queued},

@@ -12,6 +12,14 @@
   .intake small { display: block; margin-top: 8px; color: #888; }
   .prep { border: 1px solid rgba(127,127,127,.35); border-radius: 10px; padding: 10px 12px; margin-bottom: 12px; }
   .prep label { margin-right: 8px; }
+  .prep table { border-collapse: collapse; font-size: 13px; }
+  .prep th, .prep td { padding: 4px 10px 4px 0; text-align: left; vertical-align: top; white-space: nowrap; }
+  .prep th { color: #888; font-weight: 600; }
+  .prep td.day { color: inherit; font-weight: 600; }
+  .prep td small { display: block; color: #888; font-weight: 400; }
+  .prep td.off { color: #888; }
+  .prep td.off small { color: #a86; }
+  .prep td.rec small { color: #2a7; }
   .speeds button { padding: 2px 8px; font-size: 13px; }
   .choices button.picked { background: #2a7; color: #fff; border-color: #2a7; }
   .drop { border: 2px dashed #999; border-radius: 12px; padding: 28px; text-align: center; color: #666; cursor: pointer; }
@@ -48,12 +56,9 @@
     <span style="color:#888">Recording?</span><button id="prep-open">Prepare puzzles</button>
   </div>
   <div id="prep" class="prep" hidden>
-    <div class="row"><label>Days <input type="number" id="prep-days" min="1" max="14" value="1" style="width:70px"></label>
-      <label><input type="checkbox" class="prep-game" value="twixtle" checked> Twixtle</label>
-      <label><input type="checkbox" class="prep-game" value="vowelsweeper" checked> Vowelsweeper</label>
-      <label>Chrome profile <select id="prep-profile"></select></label></div>
-    <div id="prep-depth" style="color:#888;font-size:13px;margin:4px 0 8px">Checking what is queued...</div>
-    <div class="row"><button class="primary" id="prep-go">Open the tabs</button><button id="prep-close">Close</button><span id="prep-msg" style="color:#888"></span></div>
+    <div id="prep-list" style="color:#888;font-size:13px;margin:0 0 8px">Checking what is queued...</div>
+    <div class="row"><button class="primary" id="prep-go">Open the ticked</button><button id="prep-close">Close</button>
+      <label style="margin-left:auto;color:#888;font-size:13px">Chrome profile <select id="prep-profile"></select></label><span id="prep-msg" style="color:#888"></span></div>
   </div>
   <div class="drop" id="drop">Drop the raw clips here (one or several), or click to choose</div>
   <input type="file" id="file" accept="video/*" multiple hidden>
@@ -99,42 +104,54 @@ function upload(file, onProgress) {
     xhr.send(file);
   });
 }
-// Prepare puzzles: one Chrome tab per scheduled puzzle for the next N days, via the posting app.
-let prepDepth = null, prepStarts = {}, prepSkipped = [];
-function prepGames() { return [...document.querySelectorAll('.prep-game:checked')].map(c => c.value); }
-function prepCap() {
-  if (!prepDepth) return;
-  const gs = prepGames(), cap = gs.length ? Math.min(...gs.map(g => prepDepth[g] ?? 0)) : 0;
-  const d = $('#prep-days'); d.max = Math.max(cap, 1); if (+d.value > cap) d.value = Math.max(cap, 1);
-  const when = d => { const dd = new Date(d + 'T12:00:00'), t = new Date(); t.setHours(12, 0, 0, 0); const diff = Math.round((dd - t) / 864e5); return diff === -1 ? 'yesterday' : diff === 0 ? 'today' : dd.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }); };
-  const lines = Object.entries(prepDepth).map(([g, n]) => `${g}: ${n} day${n === 1 ? '' : 's'} to record` + (prepStarts[g] ? `, starting ${when(prepStarts[g])}` : ''));
-  const skipped = (prepSkipped || []).filter(s => s.why === 'recorded').map(s => `${s.label}: already recorded`);
-  $('#prep-depth').textContent = lines.join(' · ') + (skipped.length ? ' · ' + skipped.join(', ') : '') + (cap ? '' : ' · nothing to open for this choice');
-  $('#prep-go').disabled = !cap;
+// Prepare puzzles: a checklist of every puzzle from yesterday on, labelled by when its video
+// POSTS (that is how the recording is planned), the sensible ones ticked; one Chrome tab per tick.
+let prepCands = [];
+function prepDayLabel(d) {
+  const dd = new Date(d + 'T12:00:00'), t = new Date(); t.setHours(12, 0, 0, 0);
+  const diff = Math.round((dd - t) / 864e5);
+  return (diff === -1 ? 'Yesterday' : diff === 0 ? 'Today' : diff === 1 ? 'Tomorrow' : dd.toLocaleDateString('en-GB', { weekday: 'short' })) + ' ' + dd.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
 }
+function prepDueLabel(iso) {
+  const due = new Date(iso), t = new Date(); t.setHours(12, 0, 0, 0); const dd = new Date(due); dd.setHours(12, 0, 0, 0);
+  const diff = Math.round((dd - t) / 864e5), when = diff === 0 ? 'today' : diff === 1 ? 'tomorrow' : dd.toLocaleDateString('en-GB', { weekday: 'short' });
+  return when + ' ' + due.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+}
+function prepRender() {
+  const dates = [...new Set(prepCands.map(c => c.date))];
+  const cols = [['twixtle', 'daily', 'Twixtle Daily'], ['twixtle', 'bonus', 'Twixtle Hard'], ['vowelsweeper', 'daily', 'Vowelsweeper Daily'], ['vowelsweeper', 'bonus', 'Vowelsweeper Hard']];
+  $('#prep-list').innerHTML = `<table><tr><th>Puzzle of</th>${cols.map(c => `<th>${c[2]}</th>`).join('')}</tr>` + dates.map(d => `<tr><td class="day">${prepDayLabel(d)}</td>` + cols.map(([g, t]) => {
+    const c = prepCands.find(x => x.game === g && x.track === t && x.date === d);
+    if (!c) return '<td class="off">not queued</td>';
+    const id = `${g}|${t}|${d}`;
+    if (c.status === 'posted') return `<td class="off">missed<small>posted ${prepDueLabel(c.due_at)}</small></td>`;
+    return `<td class="${c.status === 'recorded' ? 'rec' : ''}"><label><input type="checkbox" class="prep-pick" value="${id}" ${c.suggested ? 'checked' : ''}> ${c.status === 'recorded' ? 'again' : 'record'}</label><small>${c.status === 'recorded' ? 'recorded ✓ · ' : ''}posts ${prepDueLabel(c.due_at)}</small></td>`;
+  }).join('') + '</tr>').join('') + '</table>';
+  document.querySelectorAll('.prep-pick').forEach(c => c.onchange = prepCount);
+  prepCount();
+}
+function prepPicks() { return [...document.querySelectorAll('.prep-pick:checked')].map(c => { const [game, track, date] = c.value.split('|'); return { game, track, date }; }); }
+function prepCount() { const n = prepPicks().length; $('#prep-go').textContent = n ? `Open ${n} tab${n === 1 ? '' : 's'}` : 'Nothing ticked'; $('#prep-go').disabled = !n; }
 $('#prep-open').onclick = async () => {
   const box = $('#prep'); box.hidden = !box.hidden; if (box.hidden) return;
-  $('#prep-msg').textContent = ''; $('#prep-depth').textContent = 'Checking what is queued...';
+  $('#prep-msg').textContent = ''; $('#prep-list').textContent = 'Checking what is queued...'; $('#prep-go').disabled = true;
   try {
-    const r = await (await fetch('/prepare?games=twixtle,vowelsweeper&days=14')).json();
+    const r = await (await fetch('/prepare')).json();
     const sel = $('#prep-profile'), saved = localStorage.getItem('prepProfile');
     sel.innerHTML = (r.profiles || []).map(p => `<option value="${esc(p.dir)}" ${p.dir === saved ? 'selected' : ''}>${esc(p.name)}</option>`).join('') || '<option value="">default</option>';
-    if (r.error) { $('#prep-depth').textContent = r.error; $('#prep-go').disabled = true; return; }
-    prepDepth = r.depth; prepStarts = r.starts || {}; prepSkipped = r.skipped || [];
-    prepCap();
-  } catch (e) { $('#prep-depth').textContent = 'Could not reach the posting app'; }
+    if (r.error) { $('#prep-list').textContent = r.error; return; }
+    prepCands = r.candidates; prepRender();
+  } catch (e) { $('#prep-list').textContent = 'Could not reach the posting app'; }
 };
-document.querySelectorAll('.prep-game').forEach(c => c.onchange = prepCap);
-$('#prep-days').oninput = prepCap;
 $('#prep-close').onclick = () => { $('#prep').hidden = true; };
 $('#prep-go').onclick = async () => {
   const profile = $('#prep-profile').value; localStorage.setItem('prepProfile', profile);
   $('#prep-go').disabled = true; $('#prep-msg').textContent = 'Opening...';
   try {
-    const r = await (await fetch('/prepare', { method: 'POST', body: JSON.stringify({ days: +$('#prep-days').value, games: prepGames(), profile }) })).json();
+    const r = await (await fetch('/prepare', { method: 'POST', body: JSON.stringify({ picks: prepPicks(), profile }) })).json();
     $('#prep-msg').textContent = r.error ? r.error : `Opened ${r.opened.length} tab${r.opened.length === 1 ? '' : 's'} in Chrome`;
   } catch (e) { $('#prep-msg').textContent = 'The server is not responding'; }
-  $('#prep-go').disabled = false;
+  prepCount();
 };
 // keep the server alive while this page is open; it quits when the pings stop
 setInterval(() => fetch('/ping').catch(() => {}), 5000);

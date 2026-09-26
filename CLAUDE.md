@@ -69,13 +69,14 @@ posting app's `bin/record-secret.sh` writes it). The editor asks the posting app
 links with its ordinary token (`poster.record_links`), so any editor can record and this
 Mac never holds the secret. Twixtle opens in its admin test mode (the puzzle stashed in
 the tab, no play recorded), Vowelsweeper as a `?b=` test board: the same surfaces Jake
-records from by hand. Which puzzles: not "from today". Jake records late at night for the
-morning, so at 00:30 the one wanted is yesterday's, whose video posts at 08:00. The posting
-app's `record_plan` (tested) starts from yesterday and keeps a puzzle while its posting
-time is ahead and this person has no video of it; the panel says where it starts and what
-it skipped as already recorded. Tabs are in day order, then game, Daily before Hard; the
-Days box is capped at the shallowest ticked queue. Chrome is addressed by profile (`prepare.py`),
-because Jake has several and the sign-ins live in one.
+records from by hand. Which puzzles is the poster's pick, from a CHECKLIST (2026-09-26): one
+row per puzzle date from yesterday on, one box per game and track, each labelled by when its
+video POSTS, since that is how the recording is planned ("it is 13:43, I have missed the
+08:00 post; I want the 18:00 one and tomorrow's two"). Missed slots are greyed, already
+recorded ones marked; the posting app's `record_plan` (tested) pre-ticks the earliest still
+wanted per track. A "days" number was tried first and could not express that afternoon.
+Tabs open in date order, then game, Daily before Hard. Chrome is addressed by profile
+(`prepare.py`), because Jake has several and the sign-ins live in one.
 
 ## Invariants
 

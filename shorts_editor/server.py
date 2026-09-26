@@ -13,8 +13,8 @@
   POST /jobs/<id>/approve     save the final to Dropbox and, when connected, schedule it in the posting app (publish.py)
   POST /jobs/<id>/rerun       re-cut + re-render with current params (or pick a stopped first run back up)
   POST /jobs/<id>/cancel      stop whatever is running on the job
-  GET  /prepare?games=a,b&days=N   how many days each game has queued (via the posting app)
-  POST /prepare               {"days", "games", "profile"} -> open one Chrome tab per scheduled puzzle
+  GET  /prepare               the recording checklist: every puzzle from yesterday on with its standing (via the posting app)
+  POST /prepare               {"picks": [{game, track, date}], "profile"} -> one Chrome tab per ticked puzzle
   DELETE /jobs/<id>           cancel if running, then remove work/<id>/ (the Dropbox copy stays)
 """
 import json
@@ -83,14 +83,11 @@ class H(BaseHTTPRequestHandler):
         if self.path == "/jobs":
             return self._json(pipeline.list_jobs())
         if self.path.startswith("/prepare"):
-            from urllib.parse import urlparse, parse_qs
             from . import prepare
-            q = parse_qs(urlparse(self.path).query)
             if not poster.enabled():
-                return self._json({"error": "not connected to the posting app (POSTER_URL in .env)"}, 400)
-            games = [g for g in (q.get("games", ["twixtle,vowelsweeper"])[0]).split(",") if g]
+                return self._json({"error": "not connected to the posting app (POSTER_URL in .env)", "profiles": prepare.chrome_profiles()}, 400)
             try:
-                r = poster.record_links(int(q.get("days", ["14"])[0]), games, probe_only=True)
+                r = {"candidates": poster.record_candidates()}
             except Exception as e:
                 r = {"error": str(e)}
             r["profiles"] = prepare.chrome_profiles()   # the profile list is this Mac's, whatever the posting app said
@@ -155,17 +152,16 @@ class H(BaseHTTPRequestHandler):
             body = json.loads(self.rfile.read(n) or b"{}") if n else {}
             if not poster.enabled():
                 return self._json({"error": "not connected to the posting app (POSTER_URL in .env)"}, 400)
-            games = [g for g in (body.get("games") or []) if g in ("twixtle", "vowelsweeper")]
-            days = max(1, min(31, int(body.get("days") or 1)))
-            if not games:
-                return self._json({"error": "tick at least one game"}, 400)
+            picks = [p for p in (body.get("picks") or []) if isinstance(p, dict)]
+            if not picks:
+                return self._json({"error": "tick at least one puzzle"}, 400)
             try:
-                r = poster.record_links(days, games)
+                r = {"links": poster.record_open(picks)}
             except Exception as e:
                 return self._json({"error": str(e)}, 502)
             if not body.get("dry"):   # dry: the test suite, which wants the list without a browser opening
                 prepare.open_in_chrome([l["url"] for l in r["links"]], body.get("profile") or None)
-            return self._json({"opened": [l["label"] for l in r["links"]], "depth": r["depth"], "starts": r.get("starts", {})})
+            return self._json({"opened": [l["label"] for l in r["links"]]})
         m = re.match(r"^/jobs/([\w-]+)/(note|title|speed|approve|rerun|cancel)$", self.path)
         if not m:
             return self._json({"error": "not found"}, 404)
