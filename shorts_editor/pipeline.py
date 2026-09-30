@@ -183,18 +183,19 @@ class Job:
             when, score = solvetone.detect(wav, found)
             _write(self.dir / "solve.json", {"game": found, "at": when, "score": score})
             self.set(msg=f"solve tone again as {found}: at {when} (score {score})")
-        self.recut(relax=True)
+        self.recut(fit=True)
         self.rerender()
 
     def set_speed(self, speed: float):
-        """Speed is chosen after the first cut, on the job's panel. The 1:30 floor is
-        measured after the speed-up, so the relax ladder runs again."""
+        """Speed is chosen after the first cut, on the job's panel. The 1:30-3:00 fit is
+        measured after the speed-up, so it runs again (and may raise a speed that runs
+        over 3:00 to one that does not)."""
         undo = {f: _read(self.dir / f) for f in ("params.json", "cut.json", "relax.json", "meta.json")}
         try:
             _write(self.dir / "params.json", {**undo["params.json"], "speed": speed})
             self._write_meta({**undo["meta.json"], "speed": speed})
             self.set(msg=f"speed {speed}x")
-            self.recut(relax=True)
+            self.recut(fit=True)
             self.rerender()
         except Cancelled:
             # it never happened: the render on screen is still the old speed
@@ -264,25 +265,30 @@ class Job:
             self.write_sidecar()
         self.set(msg=f"renamed to {meta['title']}")
 
-    def recut(self, relax=False):
-        """Rebuild cut.json from transcript + params. relax=True (first cut, speed
-        change) runs the min-length ladder; what it loosened is remembered in
-        relax.json and put back first, so a slower speed tightens the cut again.
-        A knob a note has since moved is the reviewer's and is left alone."""
+    def recut(self, fit=False):
+        """Rebuild cut.json from transcript + params. fit=True (first cut, speed
+        change) fits the length between 1:30 and 3:00 (cutlist.build_to_fit); what
+        it changed is remembered in relax.json and put back first, so a slower speed
+        tightens the cut again. A knob a note has since moved is the reviewer's and
+        is left alone."""
         words = _read(self.dir / "transcript.json")["words"]
         info = _read(self.dir / "probe.json")
         solve = (_read(self.dir / "solve.json") or {}).get("at")
         p = cutlist.Params.from_dict(_read(self.dir / "params.json"))
-        if relax:
+        if fit:
             for k, (was, now) in (_read(self.dir / "relax.json") or {}).items():
                 if getattr(p, k) == now:
                     setattr(p, k, was)
             before = p.to_dict()
-            res, p, steps = cutlist.build_with_relax(words, info["duration"], solve, p)
+            res, p, steps = cutlist.build_to_fit(words, info["duration"], solve, p)
             _write(self.dir / "relax.json", {k: [before[k], v] for k, v in p.to_dict().items() if before[k] != v})
             if steps:
-                self.set(msg="relaxed to reach min length: " + ", ".join(steps))
+                self.set(msg="fitted to length: " + ", ".join(steps))
             _write(self.dir / "params.json", p.to_dict())
+            meta = self.meta
+            if meta.get("speed") != p.speed:   # the fit sped it up: the job list shows this one
+                meta["speed"] = p.speed
+                self._write_meta(meta)
         else:
             res = cutlist.build(words, info["duration"], solve, p)
         # snap the first and last cut to the audio: Whisper's word times are late
@@ -330,9 +336,13 @@ class Job:
         _write(self.dir / "meta.json", meta)
         final = render.measure_output_loudness(out)  # not killable: out.mp4 is already the new render
         meta["too_large"] = out.stat().st_size > render.SHARE_LIMIT   # the phone cannot share it (Chrome's cap)
+        length = render.probe(out)["duration"]
+        meta["too_long"] = length > render.LENGTH_LIMIT   # Instagram will not take it
         _write(self.dir / "meta.json", meta)
         if meta["too_large"]:
             self.set(msg=f"render is {out.stat().st_size / 1e6:.0f} MB, over the {render.SHARE_LIMIT / 1e6:.0f} MB the phone can share")
+        if meta["too_long"]:
+            self.set(msg=f"render runs {length:.1f}s, over the {render.LENGTH_LIMIT:.0f}s (3:00) Instagram takes")
         _write(self.dir / "loudness_out.json", final)
         self.write_sidecar()
         self.set(stage="review", progress=100,
@@ -350,6 +360,7 @@ class Job:
             "probe": _read(self.dir / "probe.json"),
             "history": _read(self.dir / "history.json", []),
             "flags": cut.get("flags", []),
+            "fitted": _read(self.dir / "relax.json", {}),   # what the length fit changed, e.g. the speed
         }
         _write(self.dir / "sidecar.json", side)
         return side

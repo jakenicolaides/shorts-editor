@@ -9,7 +9,7 @@
   GET  /jobs/<id>/video       current render (range requests supported)
   POST /jobs/<id>/note        {"note": "..."}  -> editor loop, re-render
   POST /jobs/<id>/title       {"title": "..."} -> rename (the Dropbox file name)
-  POST /jobs/<id>/speed       {"speed": 1.2}   -> re-cut (the 1:30 floor is post-speed) + re-render
+  POST /jobs/<id>/speed       {"speed": 1.2}   -> re-cut (the 1:30-3:00 fit is post-speed) + re-render
   POST /jobs/<id>/approve     save the final to Dropbox and, when connected, schedule it in the posting app (publish.py)
   POST /jobs/<id>/rerun       re-cut + re-render with current params (or pick a stopped first run back up)
   POST /jobs/<id>/cancel      stop whatever is running on the job

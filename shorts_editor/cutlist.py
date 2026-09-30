@@ -11,7 +11,12 @@ The rules (see README) in one place:
     never cut, so the solve moment keeps its natural pacing
   * explicit overrides (start/end/keep_ranges/extra_cuts) come from the
     human-editor loop and win over the automatic rules
+  * the final length is fitted between min_duration and max_duration
+    (build_to_fit): looser when short, shorter pauses then faster when long
+
+Self-test: python -m shorts_editor.cutlist
 """
+import math
 from dataclasses import dataclass, field, asdict
 from typing import Optional
 
@@ -26,6 +31,7 @@ class Params:
     chime_len: float = 0.8        # fallback end when nothing is said after the chime
     protect_before: float = 15.0  # no cuts inside this window before the solve
     min_duration: float = 90.0    # target floor for the FINAL (post-speed) length
+    max_duration: float = 178.0   # target ceiling for it: Instagram takes up to 3:00 (render.LENGTH_LIMIT), 2s spare for the edge snapping
     remove_fillers: bool = True   # fillers count as non-content (so they can be cut)
     drop_false_starts: bool = True  # a phrase restarted after a pause loses its first attempt
     speed: float = 1.0
@@ -199,22 +205,67 @@ RELAX_LADDER = [
     ("max_gap", 7.0), ("max_gap", 10.0), ("max_gap", 15.0),
     ("remove_fillers", False),
 ]
+# Over the ceiling: shorter pauses first, then speed. The talk alone can run past 3:00, so
+# only speed always has room, up to the cap Jake set (2026-10-01); past it a note has to
+# cut some of the talk.
+TIGHTEN_LADDER = [("max_gap", 3.0), ("max_gap", 2.0)]
+MAX_FIT_SPEED = 1.5
 
 
-def build_with_relax(words, duration, solve_at, p: Params):
-    """Apply the rules, then loosen them step by step until the final length
-    reaches min_duration or the ladder runs out. Returns (result, params_used, steps)."""
+def build_to_fit(words, duration, solve_at, p: Params):
+    """Apply the rules, then bring the final length between min_duration and
+    max_duration. Under the floor, loosen step by step (RELAX_LADDER). Over the
+    ceiling, shorten the pauses (TIGHTEN_LADDER), then speed up just enough, in
+    0.05 steps, to at most MAX_FIT_SPEED. Returns (result, params_used, steps)."""
     steps = []
     cur = Params.from_dict(p.to_dict())
     res = build(words, duration, solve_at, cur)
+
+    def step(key, val):
+        nonlocal res
+        setattr(cur, key, val)
+        steps.append(f"{key}={val}")
+        res = build(words, duration, solve_at, cur)
+
     for key, val in RELAX_LADDER:
         if res["final_duration"] >= cur.min_duration:
             break
-        if getattr(cur, key) == val:
-            continue
-        setattr(cur, key, val)
-        steps.append(f"{key}={getattr(cur, key)}")
-        res = build(words, duration, solve_at, cur)
+        if getattr(cur, key) != val:
+            step(key, val)
+    for key, val in TIGHTEN_LADDER:
+        if res["final_duration"] <= cur.max_duration:
+            break
+        if getattr(cur, key) > val:
+            step(key, val)
+    if res["final_duration"] > cur.max_duration:
+        need = math.ceil(round(res["source_kept"] / cur.max_duration * 20, 6)) / 20
+        if min(need, MAX_FIT_SPEED) > cur.speed:
+            step("speed", min(need, MAX_FIT_SPEED))
     if res["final_duration"] < cur.min_duration:
         res["flags"].append("under_min_duration")
     return res, cur, steps
+
+
+if __name__ == "__main__":
+    def talk(spans):
+        """A word every 0.5s through each (start, end) span, no two alike (repeats read as false starts)."""
+        ts = [a + k * 0.5 for a, b in spans for k in range(int((b - a) / 0.5))]
+        return [{"w": "".join("abcdefghijklmnopqrstuvwxyz"[int(c)] for c in str(i)), "s": t, "e": t + 0.4} for i, t in enumerate(ts)]
+
+    # 150s of talk with a 4s think every 10s: 204s at 1.0x. Pauses to 1s (max_gap 3) makes 165s.
+    w = talk([(i * 14.0, i * 14.0 + 10) for i in range(15)])
+    res, p, steps = build_to_fit(w, 300.0, None, Params())
+    assert steps == ["max_gap=3.0"] and p.speed == 1.0 and res["final_duration"] <= p.max_duration, (steps, res["final_duration"])
+    # 250s of solid talk: no pause to shorten, so speed, rounded up to the next 0.05
+    res, p, steps = build_to_fit(talk([(0, 250)]), 300.0, None, Params())
+    assert steps[-1] == "speed=1.45" and res["final_duration"] <= p.max_duration, (steps, res["final_duration"])
+    # 300s of it: past the 1.5x cap, so it stays over and a note has to cut some talk
+    res, p, steps = build_to_fit(talk([(0, 300)]), 310.0, None, Params())
+    assert p.speed == MAX_FIT_SPEED and res["final_duration"] > p.max_duration, (p.speed, res["final_duration"])
+    # a speed already fast enough (the reviewer's) is left alone, and slower never happens
+    res, p, steps = build_to_fit(talk([(0, 250)]), 300.0, None, Params(speed=1.6))
+    assert steps == [] and p.speed == 1.6
+    # a short take still loosens, and never speeds up
+    res, p, steps = build_to_fit(talk([(0, 30), (37, 67)]), 100.0, None, Params())
+    assert steps[0] == "max_gap=7.0" and p.speed == 1.0 and "under_min_duration" in res["flags"], (steps, res)
+    print("cutlist ok")

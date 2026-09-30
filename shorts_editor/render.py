@@ -14,6 +14,9 @@ from .cancel import Token
 SHARE_LIMIT = 50 * 1024 * 1024
 SIZE_TARGET = 44 * 1024 * 1024   # headroom for the container and the VBV overshooting a little
 AUDIO_KBPS = 192
+# Instagram takes a reel of up to three minutes; six of September's videos ran longer, up to 5:11
+# (found 2026-10-01). The cut aims 2s under it (cutlist.Params.max_duration); approve holds this line.
+LENGTH_LIMIT = 180.0
 
 TARGET_I = -14.0
 TARGET_TP = -1.0

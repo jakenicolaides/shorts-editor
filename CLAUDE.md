@@ -82,8 +82,8 @@ Tabs open in date order, then game, Daily before Hard. Chrome is addressed by pr
 
 - **The LLM never touches media.** A note becomes a typed decision (`editor_llm.py`,
   `EditDecision`): knob changes as a flat name/value list, plus keep/cut ranges and
-  start/end/solve pins. The same deterministic cutter (`cutlist.py`, pure, unit-tested
-  inline) re-runs with the new params. **Keep the schema flat**: `Optional` fields each
+  start/end/solve pins. The same deterministic cutter (`cutlist.py`, pure, self-test:
+  `python -m shorts_editor.cutlist`) re-runs with the new params. **Keep the schema flat**: `Optional` fields each
   count against the API's structured-output complexity limit and it returned "Schema is
   too complex" at ~14 of them.
 - **The name comes from the schedule, not from the model or from Whisper.** With no name
@@ -131,6 +131,15 @@ Tabs open in date order, then game, Daily before Hard. Chrome is addressed by pr
   are now every two seconds, which is what Instagram's own encodes use.
 - **The 1:30 floor only loosens** (gap threshold, then fillers). It cannot invent length,
   so a short take flags `under_min_duration` and that is the answer.
+- **Nothing over 3:00 is approved** (2026-10-01): Instagram takes reels up to three minutes,
+  and six of September's approved videos ran longer (up to 5:11, all Hard solves). Approve
+  checks the rendered FILE against `render.LENGTH_LIMIT`, posting app or not; the fit aims 2s
+  under (`Params.max_duration`, room for the edge snapping). Over it, pauses go first
+  (`max_gap` 3, then 2), then speed, just enough in 0.05 steps, up to 1.5x (Jake's cap). Pauses
+  alone cannot do it: on the longest takes the talk itself runs past 3:00. Of September's
+  nine over-length takes eight now fit untouched; the ninth (5:38) is 3:25 at 1.5x, and there
+  the reviewer's note makes the editor cut talk. A note's result is not refitted, so the
+  editor is told the limit and must stay under it.
 - **Jobs run in parallel; Whisper runs one at a time** (`transcribe._one_at_a_time`,
   2026-09-24). Serialising whole jobs was tried first and made three of four dropped clips
   look stuck. Transcription alone is taken in turn: each run loads the 1.5 GB model and
@@ -141,11 +150,13 @@ Tabs open in date order, then game, Daily before Hard. Chrome is addressed by pr
   game comes from the schedule's match, then what the frame showed, then the solve tone;
   nobody picks it, because when it was picked it was sometimes picked wrong.
 - **Speed is the reviewer's call per clip**, not detected: different speakers, different
-  pace. It is made on the job's panel after the 1.0x first cut (almost every clip stays
-  at 1.0x, so asking up front cost a step to save a re-render that rarely happens). A
-  speed change re-runs the relax ladder, since the floor is post-speed; what the ladder
-  loosened is kept in `relax.json` and put back first, so slowing down tightens the cut
-  again. "Only loosens" below is about one pass, not about the job's history.
+  pace. The one exception is the 3:00 ceiling (above), which speeds a long take up as far
+  as it must. It is made on the job's panel after the 1.0x first cut (almost every clip
+  stays at 1.0x, so asking up front cost a step to save a re-render that rarely happens).
+  A speed change re-runs the fit (`cutlist.build_to_fit`), since both limits are
+  post-speed; what it changed is kept in `relax.json` and put back first, so slowing down
+  tightens the cut again, and a speed too slow for 3:00 is raised to the slowest that fits.
+  "Only loosens" above is about one pass, not about the job's history.
 - **Filenames and folders are the archive's contract**: the job's name (worked out from
   the clip, or typed) becomes `<name>.mp4` in `Dropbox/twixtle/Dailies/` or
   `Dropbox/vowelsweeper/` by game. Save is refused with no name past the date. Delete

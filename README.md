@@ -12,7 +12,7 @@ English until it is right, save it to Dropbox, post from the phone.
    yesterday on, labelled by when its video posts, with the sensible ones ticked;
    tick what you want and one Chrome tab opens per puzzle, ready to record.
 2. Drop the OBS clip on the page, or several at once. That is the whole intake. About 90s later it
-   is cut at 1.0x, the game is identified, and the job is named
+   is cut (at 1.0x, or faster when that is what gets it under 3:00), the game is identified, and the job is named
    `<date> <puzzle> <daily|hard>`, e.g. `2026-09-19 pros-towed hard`: the puzzle
    is read off the solved screen and looked up in the game's schedule (a public
    API call, nothing to set up). If it cannot be named, the panel asks for the
@@ -68,8 +68,12 @@ the two `POSTER_` lines, then `.venv/bin/python run.py` (http://localhost:8790).
   the audio; the 15s before the solve are never cut
 * under 1:30 after the speed-up: loosen the gap threshold (7/10/15s), then keep
   fillers; still short is flagged on the review page
-* speed is chosen on the job after the first cut (1.0x until then) and applied
-  uniformly (pitch preserved); the 1:30 rule is re-applied at the new speed
+* over 2:58 after the speed-up (Instagram takes up to 3:00): tighten the gap
+  threshold (3s, then 2s), then speed up just enough, at most 1.5x; still over,
+  Approve is blocked until a note cuts some of the talk
+* speed is chosen on the job after the first cut (1.0x until then, unless the 3:00
+  rule needed more) and applied uniformly (pitch preserved); both rules are
+  re-applied at the new speed, so a speed too slow for 3:00 is raised to one that fits
 * audio: two-pass loudnorm to -14 LUFS, -1 dBTP
 * video: 1080x1920 H.264 high, CRF 18, AAC 192k 48kHz, faststart
 

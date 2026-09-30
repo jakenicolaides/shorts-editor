@@ -69,12 +69,16 @@ def approve(job):
     """Dropbox first, then the schedule: the archive copy must not depend on a
     server being up. Both halves overwrite, so pressing the button again after a
     failure (or after a re-edit) is always the fix."""
-    from . import poster
+    from . import poster, render
     from .cancel import Cancelled
     try:
+        # on the file, and whether or not the posting app is connected: every video goes to Instagram
+        length = render.probe(job.dir / "out.mp4")["duration"]
+        if length > render.LENGTH_LIMIT:
+            raise RuntimeError(f"this render runs {int(length // 60)}:{length % 60:04.1f} and Instagram takes at most 3:00: "
+                               "send a note to cut some of the talk (or pick a faster speed), then Approve")
         if poster.enabled():   # a name the schedule cannot use is refused before anything is saved under it
             poster.puzzle_from_name(job.meta.get("title") or "", job_game(job))
-            from . import render
             size = (job.dir / "out.mp4").stat().st_size
             if size > render.SHARE_LIMIT:
                 raise RuntimeError(f"this render is {size / 1e6:.0f} MB and the phone can only share files under "

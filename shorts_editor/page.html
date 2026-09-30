@@ -63,7 +63,7 @@
   </div>
   <div class="drop" id="drop">Drop the raw clips here (one or several), or click to choose</div>
   <input type="file" id="file" accept="video/*" multiple hidden>
-  <small>That is all: the game and the name are worked out from the clip, and it is cut at 1.0x. Change the speed or the name on the job afterwards.</small>
+  <small>That is all: the game and the name are worked out from the clip, and it is cut at 1.0x (faster only when that is what gets it under 3:00). Change the speed or the name on the job afterwards.</small>
   <span id="upmsg" style="color:#e74"></span>
 </div>
 
@@ -189,7 +189,7 @@ async function showDetail() {
     $('#vidbox').innerHTML = ver ? `<video id="v" controls playsinline preload="metadata" src="/jobs/${sel}/video?v=${ver}"></video>` : `<div style="color:#888">Rendering...</div>`;
     shownVersion = ver;
   }
-  const sig = JSON.stringify([(side.params || {}).speed, st.stage, st.progress, (st.log || []).length, (j.history || []).length, j.meta.saved_to, (j.meta.scheduled || {}).due_at, (j.meta.scheduled || {}).version, j.meta.too_large, cut.final_duration, j.meta.title, j.meta.title_suggested]);
+  const sig = JSON.stringify([(side.params || {}).speed, st.stage, st.progress, (st.log || []).length, (j.history || []).length, j.meta.saved_to, (j.meta.scheduled || {}).due_at, (j.meta.scheduled || {}).version, j.meta.too_large, j.meta.too_long, cut.final_duration, j.meta.title, j.meta.title_suggested]);
   if (sig !== shownSig) {
     const noteDraft = el.querySelector('#note') ? el.querySelector('#note').value : '';
     const ttlDraft = el.querySelector('#ttl') && el.querySelector('#ttl').value !== el.querySelector('#ttl').defaultValue ? el.querySelector('#ttl').value : (j.meta.title || '');
@@ -208,12 +208,14 @@ async function showDetail() {
         <div class="row choices speeds"><span style="color:#888;font-size:13px">speed</span>
           ${SPEEDS.map(v => `<button data-speed="${v}" class="${+(side.params||{}).speed === v ? 'picked' : ''}" ${busy ? 'disabled' : ''}>${v}x</button>`).join('')}
           ${SPEEDS.includes(+(side.params||{}).speed) ? '' : `<button class="picked" disabled>${(side.params||{}).speed}x</button>`}
+          ${(side.fitted||{}).speed && +side.fitted.speed[1] === +(side.params||{}).speed ? `<span style="color:#888;font-size:13px">${j.meta.too_long ? 'sped up as far as it goes for 3:00' : 'sped up to fit 3:00'}</span>` : ''}
         </div>` : ''}
         ${!named && !busy ? `<div class="hist" style="border-color:#e74"><b>No name yet</b>${esc(j.meta.title_why ? 'Could not work it out from the clip: ' + j.meta.title_why + '.' : '')} Type it below (date, puzzle, daily or hard) to save.</div>` : ''}
         ${j.meta.title_suggested ? `<div class="hist" style="border-color:#27c"><b>The schedule has this puzzle as: ${esc(j.meta.title_suggested)}</b><button id="use-sugg" ${busy ? 'disabled' : ''}>Use this name</button></div>` : ''}
         <div class="row"><input type="text" id="ttl" value="${esc(ttlDraft)}" placeholder="2026-09-14 aye-hassle daily" style="width:260px" ${busy ? 'disabled' : ''}> <button id="ttl-save" ${busy ? 'disabled' : ''}>Rename</button></div>
         ${j.meta.saved_to ? `<div class="hist" style="border-color:#27c"><b>Saved to Dropbox</b>${esc(j.meta.saved_to.replace(/^.*CloudStorage\/Dropbox\//, 'Dropbox/'))}</div>` : ''}
         ${j.meta.too_large ? `<div class="hist" style="border-color:#e74"><b>Too large for the phone to share</b>Chrome caps shared files at 50 MB. Press Re-render: new renders are capped under it.</div>` : ''}
+        ${j.meta.too_long ? `<div class="hist" style="border-color:#e74"><b>Over Instagram's 3:00</b>Approve is blocked until it is under. Send a note to cut some of the talk (e.g. "get it under 3 minutes")${+(side.params||{}).speed < 1.5 ? ', or pick a faster speed: a speed change shortens the pauses and speeds up as far as 1.5x to fit' : ''}.</div>` : ''}
         ${j.meta.scheduled ? `<div class="hist" style="border-color:${j.meta.scheduled.version === ver ? '#27c' : '#e74'}"><b>${j.meta.scheduled.version === ver ? 'Scheduled to post' : 'Scheduled, but that was an earlier render'}</b>${new Date(j.meta.scheduled.due_at) <= new Date() ? 'It is due now: it is on the phone.' : 'Due ' + new Date(j.meta.scheduled.due_at).toLocaleString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' }) + '.'}${j.meta.scheduled.version === ver ? '' : ' Approve again to replace it with this one.'}</div>` : ''}
         <h3 style="margin:16px 0 6px">Notes to the editor</h3>
         ${(j.history || []).map(h => `<div class="hist"><b>You: ${esc(h.note)}</b>Editor: ${esc(h.reply)}</div>`).join('')}
@@ -221,7 +223,7 @@ async function showDetail() {
         <div class="row">
           <button id="send" ${busy ? 'disabled' : ''}>Send note</button>
           <button id="rerun" ${busy ? 'disabled' : ''}>${ver ? 'Re-render' : 'Try again'}</button>
-          <button id="approve" class="primary" ${busy || !ver || !named ? 'disabled' : ''}>${j.poster ? (j.meta.scheduled ? 'Approve again (replaces it)' : 'Approve: save and schedule') : (j.meta.saved_to ? 'Save to Dropbox again' : 'Save to Dropbox')}</button>
+          <button id="approve" class="primary" ${busy || !ver || !named || j.meta.too_long ? 'disabled' : ''}>${j.poster ? (j.meta.scheduled ? 'Approve again (replaces it)' : 'Approve: save and schedule') : (j.meta.saved_to ? 'Save to Dropbox again' : 'Save to Dropbox')}</button>
           ${busy && st.stage !== 'saving' ? '<button id="cancel">Cancel</button>' : ''}
           <button id="delete" class="danger">Delete</button>
         </div>
