@@ -109,20 +109,22 @@ function upload(file, onProgress) {
 // POSTS (that is how the recording is planned), the sensible ones ticked; one Chrome tab per tick.
 let prepCands = [];
 function prepRender() {
-  // Rows are POSTING days (the day the videos go out), which is how the recording is planned;
-  // the puzzle's own date is the day before and is not shown.
+  // Rows are POSTING days (the day the videos go out), which is how the recording is planned.
+  // The puzzle's own date, the day before, is shown small under it: without it, today's
+  // puzzle sitting in Tomorrow's row read as "today's puzzle cannot be recorded".
   const dayOf = iso => { const d = new Date(iso); d.setHours(12, 0, 0, 0); return d; };
   const key = iso => dayOf(iso).toISOString().slice(0, 10);
   const days = [...new Set(prepCands.map(c => key(c.due_at)))].sort();
   const cols = [['twixtle', 'daily', 'Twixtle Daily'], ['twixtle', 'bonus', 'Twixtle Hard'], ['vowelsweeper', 'daily', 'Vowelsweeper Daily'], ['vowelsweeper', 'bonus', 'Vowelsweeper Hard']];
   const slotTime = t => { const c = prepCands.find(x => x.track === t); return c ? new Date(c.due_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) : ''; };
   const dayLabel = k => { const d = dayOf(k + 'T12:00:00Z'), t = new Date(); t.setHours(12, 0, 0, 0); const diff = Math.round((d - t) / 864e5);
-    return (diff === 0 ? 'Today' : diff === 1 ? 'Tomorrow' : d.toLocaleDateString('en-GB', { weekday: 'long' })) + '<small>' + d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) + '</small>'; };
+    const p = new Date(d - 864e5), dm = x => x.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+    return (diff === 0 ? 'Today' : diff === 1 ? 'Tomorrow' : d.toLocaleDateString('en-GB', { weekday: 'long' })) + `<small>${dm(d)}</small><small>puzzle of ${dm(p)}</small>`; };
   $('#prep-list').innerHTML = `<table><tr><th>Posts on</th>${cols.map(([g, t, l]) => `<th>${l}<small>${slotTime(t)}</small></th>`).join('')}</tr>` + days.map(k => `<tr><td class="day">${dayLabel(k)}</td>` + cols.map(([g, t]) => {
     const c = prepCands.find(x => x.game === g && x.track === t && key(x.due_at) === k);
     if (!c) return '<td class="off">not queued</td>';
     const id = `${g}|${t}|${c.date}`;
-    if (c.status === 'posted') return `<td class="off">missed<small>slot has passed</small></td>`;
+    if (c.status === 'posted') return c.video ? `<td class="off">recorded ✓<small>slot has passed</small></td>` : `<td class="off">missed<small>no video for it</small></td>`;
     return `<td class="${c.status === 'recorded' ? 'rec' : ''}"><label><input type="checkbox" class="prep-pick" value="${id}" ${c.suggested ? 'checked' : ''}> ${c.status === 'recorded' ? 'again' : 'record'}</label>${c.status === 'recorded' ? '<small>recorded ✓</small>' : ''}</td>`;
   }).join('') + '</tr>').join('') + '</table>';
   document.querySelectorAll('.prep-pick').forEach(c => c.onchange = prepCount);
