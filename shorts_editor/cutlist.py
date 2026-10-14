@@ -31,7 +31,7 @@ class Params:
     chime_len: float = 0.8        # fallback end when nothing is said after the chime
     protect_before: float = 15.0  # no cuts inside this window before the solve
     min_duration: float = 90.0    # target floor for the FINAL (post-speed) length
-    max_duration: float = 178.0   # target ceiling for it: Instagram takes up to 3:00 (render.LENGTH_LIMIT), 2s spare for the edge snapping
+    max_duration: Optional[float] = 178.0   # target ceiling for it: Instagram takes up to 3:00 (render.LENGTH_LIMIT), 2s spare for the edge snapping; None for a game not posted there
     remove_fillers: bool = True   # fillers count as non-content (so they can be cut)
     drop_false_starts: bool = True  # a phrase restarted after a pause loses its first attempt
     speed: float = 1.0
@@ -216,7 +216,8 @@ def build_to_fit(words, duration, solve_at, p: Params):
     """Apply the rules, then bring the final length between min_duration and
     max_duration. Under the floor, loosen step by step (RELAX_LADDER). Over the
     ceiling, shorten the pauses (TIGHTEN_LADDER), then speed up just enough, in
-    0.05 steps, to at most MAX_FIT_SPEED. Returns (result, params_used, steps)."""
+    0.05 steps, to at most MAX_FIT_SPEED. No ceiling (max_duration None), no
+    tightening. Returns (result, params_used, steps)."""
     steps = []
     cur = Params.from_dict(p.to_dict())
     res = build(words, duration, solve_at, cur)
@@ -232,12 +233,13 @@ def build_to_fit(words, duration, solve_at, p: Params):
             break
         if getattr(cur, key) != val:
             step(key, val)
+    ceiling = cur.max_duration if cur.max_duration is not None else math.inf
     for key, val in TIGHTEN_LADDER:
-        if res["final_duration"] <= cur.max_duration:
+        if res["final_duration"] <= ceiling:
             break
         if getattr(cur, key) > val:
             step(key, val)
-    if res["final_duration"] > cur.max_duration:
+    if res["final_duration"] > ceiling:
         need = math.ceil(round(res["source_kept"] / cur.max_duration * 20, 6)) / 20
         if min(need, MAX_FIT_SPEED) > cur.speed:
             step("speed", min(need, MAX_FIT_SPEED))
@@ -265,6 +267,9 @@ if __name__ == "__main__":
     # a speed already fast enough (the reviewer's) is left alone, and slower never happens
     res, p, steps = build_to_fit(talk([(0, 250)]), 300.0, None, Params(speed=1.6))
     assert steps == [] and p.speed == 1.6
+    # no ceiling (a game not posted to Instagram): 250s of talk is left alone
+    res, p, steps = build_to_fit(talk([(0, 250)]), 300.0, None, Params(max_duration=None))
+    assert steps == [] and p.speed == 1.0 and res["final_duration"] > 178, (steps, res["final_duration"])
     # a short take still loosens, and never speeds up
     res, p, steps = build_to_fit(talk([(0, 30), (37, 67)]), 100.0, None, Params())
     assert steps[0] == "max_gap=7.0" and p.speed == 1.0 and "under_min_duration" in res["flags"], (steps, res)

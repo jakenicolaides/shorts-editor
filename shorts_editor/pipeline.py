@@ -179,10 +179,13 @@ class Job:
 
         found = self.infer_title(game, when, info["duration"])
         if found and found != game:
-            # the tone was matched against the wrong game's template (or the best of two misses)
+            # the tone was matched against the wrong game's template (or the best of two misses;
+            # a practice session has no tone at all, so any match was another game's sound)
             when, score = solvetone.detect(wav, found)
             _write(self.dir / "solve.json", {"game": found, "at": when, "score": score})
-            self.set(msg=f"solve tone again as {found}: at {when} (score {score})")
+            from .title import PRACTICE
+            self.set(msg=f"{found} has no solve: it ends on the last word" if found in PRACTICE
+                     else f"solve tone again as {found}: at {when} (score {score})")
         self.recut(fit=True)
         self.rerender()
 
@@ -225,8 +228,9 @@ class Job:
             # no tone for the game that was picked: a tone from the other game still says
             # where the solved screen is (and the clip may be under the wrong game)
             _, solve_at, _ = solvetone.detect_any(self.dir / "audio.wav")
+        recorded = title.recorded_on(self.meta.get("name"), self.id[:10])
         try:
-            res = title.infer(self.input, self.dir, duration, solve_at, game, token=self.token)
+            res = title.infer(self.input, self.dir, duration, solve_at, game, recorded, token=self.token)
         except Cancelled:
             raise
         except Exception as e:
@@ -240,8 +244,8 @@ class Job:
             self.set(msg="no name from the clip: " + res["why"])
         elif not typed:
             meta["title"] = res["title"]
-            self.set(msg=f"named from the schedule: {res['title']}")
-        elif typed.lower() != res["title"]:
+            self.set(msg=f"named from the {'schedule' if res.get('match') else 'recording date'}: {res['title']}")
+        elif typed.lower() != res["title"] and res.get("match"):   # a practice session has no schedule to correct a typed name
             meta["title_suggested"] = res["title"]
             self.set(msg=f"the schedule has this puzzle as: {res['title']}")
         picked = meta.get("game") or "auto"
@@ -276,6 +280,8 @@ class Job:
         solve = (_read(self.dir / "solve.json") or {}).get("at")
         p = cutlist.Params.from_dict(_read(self.dir / "params.json"))
         if fit:
+            # the ceiling is the game's (Spelling Garden has none), known only once the clip is named
+            p.max_duration = cutlist.Params().max_duration if render.length_limit(self.meta.get("game")) else None
             for k, (was, now) in (_read(self.dir / "relax.json") or {}).items():
                 if getattr(p, k) == now:
                     setattr(p, k, was)
@@ -291,6 +297,9 @@ class Job:
                 self._write_meta(meta)
         else:
             res = cutlist.build(words, info["duration"], solve, p)
+        from .title import PRACTICE
+        if self.meta.get("game") in PRACTICE:   # a practice session has no solve to find: that is not a problem
+            res["flags"] = [f for f in res["flags"] if f != "no_solve_detected"]
         # snap the first and last cut to the audio: Whisper's word times are late
         # at onsets and early at offsets, and the brief is no space either side
         if res["keep"]:
@@ -337,12 +346,13 @@ class Job:
         final = render.measure_output_loudness(out)  # not killable: out.mp4 is already the new render
         meta["too_large"] = out.stat().st_size > render.SHARE_LIMIT   # the phone cannot share it (Chrome's cap)
         length = render.probe(out)["duration"]
-        meta["too_long"] = length > render.LENGTH_LIMIT   # Instagram will not take it
+        limit = render.length_limit(meta.get("game"))
+        meta["too_long"] = limit is not None and length > limit   # Instagram will not take it
         _write(self.dir / "meta.json", meta)
         if meta["too_large"]:
             self.set(msg=f"render is {out.stat().st_size / 1e6:.0f} MB, over the {render.SHARE_LIMIT / 1e6:.0f} MB the phone can share")
         if meta["too_long"]:
-            self.set(msg=f"render runs {length:.1f}s, over the {render.LENGTH_LIMIT:.0f}s (3:00) Instagram takes")
+            self.set(msg=f"render runs {length:.1f}s, over the {limit:.0f}s (3:00) Instagram takes")
         _write(self.dir / "loudness_out.json", final)
         self.write_sidecar()
         self.set(stage="review", progress=100,

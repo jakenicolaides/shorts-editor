@@ -1,6 +1,7 @@
 # CLAUDE.md
 
-Automatic first cut for the daily puzzle-game shorts (Twixtle, Vowelsweeper). Jake
+Automatic first cut for the daily puzzle-game shorts (Twixtle, Vowelsweeper, and Spelling
+Garden practice since 2026-10-14). Jake
 records one 9:16 OBS clip per game per day, this turns it into a posted-ready MP4 in
 about 90 seconds, he steers it with plain-English notes, and approves it: the file goes to
 Dropbox (the archive) and to the posting app, which tells the right person's phone when it
@@ -139,7 +140,9 @@ Tabs open in date order, then game, Daily before Hard. Chrome is addressed by pr
   alone cannot do it: on the longest takes the talk itself runs past 3:00. Of September's
   nine over-length takes eight now fit untouched; the ninth (5:38) is 3:25 at 1.5x, and there
   the reviewer's note makes the editor cut talk. A note's result is not refitted, so the
-  editor is told the limit and must stay under it.
+  editor is told the limit and must stay under it. The limit is per game
+  (`render.length_limit`): Spelling Garden never goes to Instagram, so it has none
+  (`Params.max_duration` None) and only the 1:30 floor applies.
 - **Jobs run in parallel; Whisper runs one at a time** (`transcribe._one_at_a_time`,
   2026-09-24). Serialising whole jobs was tried first and made three of four dropped clips
   look stuck. Transcription alone is taken in turn: each run loads the 1.5 GB model and
@@ -157,9 +160,19 @@ Tabs open in date order, then game, Daily before Hard. Chrome is addressed by pr
   post-speed; what it changed is kept in `relax.json` and put back first, so slowing down
   tightens the cut again, and a speed too slow for 3:00 is raised to the slowest that fits.
   "Only loosens" above is about one pass, not about the job's history.
+- **Spelling Garden is practice, not a puzzle** (2026-10-14): Jake reviews his daily words,
+  so there is no schedule to ask, no solve tone, nothing for Prepare puzzles to open. The
+  frame read only says which game it is (`title.PRACTICE`); the name is `<date>
+  spelling-garden`, the date taken from the dropped file's name (OBS writes it), else the
+  drop day. With no solve the cut ends on the last word, as when a tone is missed, minus the
+  `no_solve_detected` flag. It does not go to Instagram, so no 3:00 ceiling: a raw 8:45
+  session comes out at 8:10, 1.0x. The 50 MiB cap still holds (about 0.8 Mbps at that
+  length; the game's flat art and the webcam stand it). The posting app does not take it yet
+  (`publish.ARCHIVE_ONLY`), so Approve only saves it to Dropbox; `<date>.mp4` names in that
+  folder are Jake's own, and the suffix keeps an approve from overwriting one.
 - **Filenames and folders are the archive's contract**: the job's name (worked out from
-  the clip, or typed) becomes `<name>.mp4` in `Dropbox/twixtle/Dailies/` or
-  `Dropbox/vowelsweeper/` by game. Save is refused with no name past the date. Delete
+  the clip, or typed) becomes `<name>.mp4` in `Dropbox/twixtle/Dailies/`,
+  `Dropbox/vowelsweeper/` or `Dropbox/spelling-garden/` by game. Save is refused with no name past the date. Delete
   removes `work/<id>/` only, never the Dropbox copy.
 
 ## Environment traps

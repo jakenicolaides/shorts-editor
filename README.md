@@ -1,6 +1,7 @@
 # shorts-editor
 
-Automatic first cut for the daily puzzle-game shorts. Drop the raw OBS clip in,
+Automatic first cut for the daily puzzle-game shorts (Twixtle, Vowelsweeper) and
+the Spelling Garden practice videos. Drop the raw OBS clip in,
 get back a cut, normalised, TikTok-ready MP4, talk to the editor in plain
 English until it is right, save it to Dropbox, post from the phone.
 
@@ -16,20 +17,23 @@ English until it is right, save it to Dropbox, post from the phone.
    `<date> <puzzle> <daily|hard>`, e.g. `2026-09-19 pros-towed hard`: the puzzle
    is read off the solved screen and looked up in the game's schedule (a public
    API call, nothing to set up). If it cannot be named, the panel asks for the
-   name before saving.
+   name before saving. A Spelling Garden clip is practice, not a puzzle: it is
+   named `<date> spelling-garden` from the date in the clip's file name and ends
+   on the last word, with no solve to find.
 3. Watch the cut on the page. Type notes to the editor if it needs changes
    (it re-cuts and re-renders, about 2 min). Speed buttons and Rename are on the
    same panel; a speed change is a re-render. Cancel stops whatever is running
    (a first run picks back up with Try again); Delete removes the job from this
    Mac and leaves any copy already saved to Dropbox.
-4. Approve. `<name>.mp4` lands in Dropbox (`twixtle/Dailies/` or `vowelsweeper/`)
+4. Approve. `<name>.mp4` lands in Dropbox (`twixtle/Dailies/`, `vowelsweeper/` or `spelling-garden/`)
    as the archive, and the video is uploaded to the posting app and scheduled for
    the day after its puzzle (Daily in the morning, Daily Hard in the evening, UK
    time). At that time the phone of whoever posts that game is notified; the app
    there has the video, a Share button per platform and the caption ready to
    paste. Approving again after a re-edit replaces the scheduled video.
    Not connected to the posting app (no `POSTER_URL` in `.env`)? Then this step
-   only saves to Dropbox, as it always did.
+   only saves to Dropbox, as it always did. Spelling Garden is only saved to
+   Dropbox either way: the posting app does not take it yet.
 
 Closing the page quits the server and its Terminal window.
 
@@ -65,12 +69,14 @@ the two `POSTER_` lines, then `.venv/bin/python run.py` (http://localhost:8790).
 * any stretch over 5s with no real word (silence, or only um/err) is removed,
   leaving 0.5s of air either side; shorter pauses are kept whole
 * end 0.15s after the last word said within 8s of the solve chime, snapped to
-  the audio; the 15s before the solve are never cut
+  the audio; the 15s before the solve are never cut. No chime (Spelling Garden
+  never has one): end 0.15s after the last word
 * under 1:30 after the speed-up: loosen the gap threshold (7/10/15s), then keep
   fillers; still short is flagged on the review page
 * over 2:58 after the speed-up (Instagram takes up to 3:00): tighten the gap
   threshold (3s, then 2s), then speed up just enough, at most 1.5x; still over,
-  Approve is blocked until a note cuts some of the talk
+  Approve is blocked until a note cuts some of the talk. Spelling Garden does not
+  go to Instagram and has no ceiling
 * speed is chosen on the job after the first cut (1.0x until then, unless the 3:00
   rule needed more) and applied uniformly (pitch preserved); both rules are
   re-applied at the new speed, so a speed too slow for 3:00 is raised to one that fits

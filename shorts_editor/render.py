@@ -17,6 +17,12 @@ AUDIO_KBPS = 192
 # Instagram takes a reel of up to three minutes; six of September's videos ran longer, up to 5:11
 # (found 2026-10-01). The cut aims 2s under it (cutlist.Params.max_duration); approve holds this line.
 LENGTH_LIMIT = 180.0
+NOT_INSTAGRAM = ("spelling-garden",)   # never posted there (2026-10-14), so no ceiling, only the 1:30 floor
+
+
+def length_limit(game: str):
+    """The longest this game's render may run, in seconds; None for no limit."""
+    return None if game in NOT_INSTAGRAM else LENGTH_LIMIT
 
 TARGET_I = -14.0
 TARGET_TP = -1.0

@@ -203,7 +203,7 @@ async function showDetail() {
         ${(side.flags || []).map(f => `<span class="flag">${f}</span>`).join('')}
         ${cut.keep ? `<div class="kv">
           <span>final length</span><span>${fmt(cut.final_duration)} (${cut.keep.length} segments, ${fmt(cut.source_kept)} of ${fmt((side.probe||{}).duration)} kept)</span>
-          <span>solve</span><span>${side.solve && side.solve.at != null ? fmt(side.solve.at) + ' (' + side.solve.game + ', score ' + side.solve.score + ')' : 'not detected'}</span>
+          <span>solve</span><span>${side.solve && side.solve.at != null ? fmt(side.solve.at) + ' (' + side.solve.game + ', score ' + side.solve.score + ')' : j.meta.game === 'spelling-garden' ? 'none: practice ends on the last word' : 'not detected'}</span>
           <span>loudness</span><span>${side.loudness_out ? side.loudness_out.input_i + ' LUFS, peak ' + side.loudness_out.input_tp + ' dBTP' : ''}</span>
           <span>gap</span><span>${(side.params||{}).max_gap}s</span>
         </div>

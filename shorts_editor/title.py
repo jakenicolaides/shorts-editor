@@ -2,11 +2,17 @@
 ask the game which date that puzzle is scheduled for.
 
   <date> <puzzle> <difficulty>      date is year first, so the archive sorts
-  Twixtle        2026-09-19 pros-towed hard
-  Vowelsweeper   2026-09-15 prove daily
+  Twixtle          2026-09-19 pros-towed hard
+  Vowelsweeper     2026-09-15 prove daily
+  Spelling Garden  2026-10-13 spelling-garden
 
 Difficulty is the schedule's track: `daily` is the Daily, `bonus` is what
 players see as Daily Hard.
+
+Spelling Garden (2026-10-14) is a practice session, not a puzzle: no schedule
+to ask and no solve tone. The frame read only has to say which game it is, and
+the date is the recording's, from the dropped file's name (OBS names clips
+`2026-10-13 22-59-41.mov`), else the day it was dropped.
 
 The frame read is a typed guess (Claude vision, flat schema like EditDecision);
 the schedule is the authority. A name is only produced when the read matches a
@@ -61,7 +67,14 @@ def lookup(game: str, read, token: Token = None):
     return _api(API[game], {"rows": read.grid_rows}).get("match")
 
 
-GAMES = ("twixtle", "vowelsweeper")
+GAMES = ("twixtle", "vowelsweeper", "spelling-garden")
+PRACTICE = ("spelling-garden",)  # no puzzle of the day: no schedule, no solve tone, ends on the last word
+
+
+def recorded_on(clip_name: str, fallback: str) -> str:
+    """The date in the dropped file's name, else `fallback` (the day it was dropped)."""
+    m = re.search(r"\d{4}-\d{2}-\d{2}", clip_name or "")
+    return m.group(0) if m else fallback
 
 
 def _word(s: str) -> str:
@@ -98,7 +111,7 @@ def read_frames(frames: list):
     from . import editor_llm
 
     class PuzzleRead(BaseModel):
-        game: Literal["twixtle", "vowelsweeper", "unknown"]
+        game: Literal["twixtle", "vowelsweeper", "spelling-garden", "unknown"]
         start_word: str = Field(description="Twixtle: the word in the top black bar. Empty if not fully visible or not Twixtle.")
         end_word: str = Field(description="Twixtle: the word in the bottom black bar. Empty if not fully visible or not Twixtle.")
         grid_rows: List[str] = Field(description="Vowelsweeper: one string per grid row, top to bottom, one character per "
@@ -112,8 +125,10 @@ def read_frames(frames: list):
     content.append({"type": "text", "text":
                     "Frames from one screen recording of a daily word puzzle (webcam above, game below), in time order. "
                     "Read the puzzle exactly as shown; do not guess or correct spellings. Twixtle is a ladder of word "
-                    "boxes between two black bars. Vowelsweeper is a 5x5 grid of letter tiles. Prefer the frame that "
-                    "shows the most of the puzzle."})
+                    "boxes between two black bars. Vowelsweeper is a 5x5 grid of letter tiles. Spelling Garden is a "
+                    "pixel-art garden on grass with a parchment card (a sentence with a blank, 'Type what you hear', "
+                    "Check) and a Practise button: it has no puzzle to read, so leave the other fields empty. Prefer "
+                    "the frame that shows the most of the puzzle."})
     resp = anthropic.Anthropic().messages.parse(
         model=editor_llm.MODEL, max_tokens=2000,
         messages=[{"role": "user", "content": content}], output_format=PuzzleRead)
@@ -122,8 +137,9 @@ def read_frames(frames: list):
     return resp.parsed_output
 
 
-def infer(src: Path, workdir: Path, duration: float, solve_at, game: str, token: Token = None) -> dict:
-    """{"title": str|None, "game", "read", "match", "why"}; raises when the lookup or the frame read fails."""
+def infer(src: Path, workdir: Path, duration: float, solve_at, game: str, recorded: str, token: Token = None) -> dict:
+    """{"title": str|None, "game", "read", "match", "why"}; raises when the lookup or the frame read fails.
+    `recorded` (recorded_on) names a practice session, which has no schedule to ask."""
     token = token or Token()
     frames = [grab_frame(src, t, workdir / f"title_frame_{i}.jpg", token) for i, t in enumerate(frame_times(duration, solve_at))]
     read = read_frames(frames)
@@ -132,6 +148,9 @@ def infer(src: Path, workdir: Path, duration: float, solve_at, game: str, token:
     out = {"title": None, "game": game, "read": read.model_dump(), "match": None, "why": None}
     if game not in GAMES:
         out["why"] = "could not tell which game this is"
+        return out
+    if game in PRACTICE:
+        out["title"] = f"{recorded} {game}"
         return out
     row = lookup(game, read, token)
     token.check()
@@ -147,5 +166,6 @@ def infer(src: Path, workdir: Path, duration: float, solve_at, game: str, token:
 if __name__ == "__main__":
     assert title_for("twixtle", {"date": "2026-09-19", "track": "bonus", "start": "pros", "end": "towed"}) == "2026-09-19 pros-towed hard"
     assert title_for("vowelsweeper", {"date": "2026-09-15", "track": "daily", "key": "prove"}) == "2026-09-15 prove daily"
+    assert recorded_on("2026-10-13 22-59-41.mov", "2026-10-14") == "2026-10-13" and recorded_on("clip.mov", "2026-10-14") == "2026-10-14"
     assert frame_times(141.1, 138.4) == [140.1] and frame_times(188.5, 173.8) == [176.3, 187.5] and frame_times(95.0, None) == [89.0, 94.0]
     print("ok")

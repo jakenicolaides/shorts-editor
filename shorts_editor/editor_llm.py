@@ -39,6 +39,7 @@ How the automatic cut works, so you know which knob does what:
 - The video starts on the first real word (start_air is near zero and the onset is snapped to the audio).
 - Any stretch longer than max_gap seconds with no real word (silence, or only fillers like um/err) is removed, leaving `air` seconds either side. Stretches shorter than max_gap are kept whole.
 - The video ends right after the last word said within post_solve_window seconds of the solve chime, plus end_air. The protect_before seconds before the solve are never cut, so the solve keeps its natural pacing.
+- A video with no solve (Spelling Garden is practice, not a puzzle, so it never has one; otherwise the chime was not found) ends right after the last word said, plus end_air; post_solve_window and protect_before do nothing there.
 - speed is a uniform playback speed-up applied to the whole video.
 - The final length (source seconds kept / speed) must stay between min_duration and max_duration. max_duration is just under 3:00, the longest reel Instagram takes: a video over it cannot be approved. On the first cut and on a speed change the system fits the length: under min_duration it loosens max_gap, then keeps fillers; over max_duration it lowers max_gap to 3 then 2, then raises speed as far as 1.5x. Your change is not refitted: the final length is exactly what your change gives.
 - Overrides win over the rules: start_override/end_override/solve_override pin those moments; keep ranges are never cut; extra cuts are always removed.
@@ -49,6 +50,7 @@ Guidance:
 - When the note names a moment, find it in the timeline and quote the words in your reply so the reviewer can check you found the right place.
 - If a note is ambiguous, make the most likely change and say what you assumed.
 - If the note asks for something you cannot do with these knobs, say so in the reply and change nothing.
+- max_duration null means this video does not go to Instagram (Spelling Garden): there is no ceiling, only min_duration.
 - Never leave the final length over max_duration. If what the reviewer asks for would push it over, do it and win the time back elsewhere (a smaller max_gap, or a little more speed, up to 1.5x), and say so.
 - When asked to get it under 3 minutes, cut the least essential talk with extra cuts (a tangent, an explanation given twice, a guess talked through at length) rather than speeding past 1.5x. Keep clear of the protect_before seconds before the solve, and quote what you cut."""
 
@@ -112,7 +114,7 @@ def decide(note: str, words: list, params: dict, cut: dict, history: list, durat
     hist_txt = "\n".join(f"- reviewer: {h['note']}\n  editor: {h['reply']}" for h in history) or "(none)"
     limits = cutlist.Params.from_dict(params)
     user = f"""Raw recording length: {duration:.1f}s. Solve moment detected at: {cut.get('solve_at')}.
-Current final length: {cut['final_duration']:.1f}s ({cut['source_kept']:.1f}s of source kept, at speed {params.get('speed')}). It must end up between {limits.min_duration:.0f}s and {limits.max_duration:.0f}s.
+Current final length: {cut['final_duration']:.1f}s ({cut['source_kept']:.1f}s of source kept, at speed {params.get('speed')}). {f"It must end up between {limits.min_duration:.0f}s and {limits.max_duration:.0f}s." if limits.max_duration is not None else f"It must be at least {limits.min_duration:.0f}s; there is no upper limit (it does not go to Instagram)."}
 
 Current parameters (start_override/end_override/solve_override are null unless pinned):
 {params}

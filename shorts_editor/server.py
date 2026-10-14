@@ -100,9 +100,11 @@ class H(BaseHTTPRequestHandler):
             return self._json({"error": "no such job"}, 404)
         if m.group(2):
             return self._video(job.dir / "out.mp4")
+        from .publish import schedules
         side = pipeline._read(job.dir / "sidecar.json", {})
         return self._json({"id": job.id, "status": job.status(), "meta": job.meta, "sidecar": side,
-                           "history": pipeline._read(job.dir / "history.json", []), "poster": poster.enabled()})
+                           "history": pipeline._read(job.dir / "history.json", []),
+                           "poster": schedules(job)})
 
     def _video(self, path: Path):
         if not path.exists():

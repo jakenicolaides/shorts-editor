@@ -8,7 +8,14 @@ import shutil
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-GAME_FOLDERS = {"twixtle": "twixtle/Dailies", "vowelsweeper": "vowelsweeper"}
+GAME_FOLDERS = {"twixtle": "twixtle/Dailies", "vowelsweeper": "vowelsweeper", "spelling-garden": "spelling-garden"}
+ARCHIVE_ONLY = ("spelling-garden",)   # the posting app does not take these yet (2026-10-14): approve only saves to Dropbox
+
+
+def schedules(job) -> bool:
+    """Does approving this job also hand it to the posting app?"""
+    from . import poster
+    return poster.enabled() and job_game(job) not in ARCHIVE_ONLY
 
 
 def env():
@@ -71,13 +78,14 @@ def approve(job):
     failure (or after a re-edit) is always the fix."""
     from . import poster, render
     from .cancel import Cancelled
+    post = schedules(job)
     try:
-        # on the file, and whether or not the posting app is connected: every video goes to Instagram
-        length = render.probe(job.dir / "out.mp4")["duration"]
-        if length > render.LENGTH_LIMIT:
+        # on the file, and whether or not the posting app is connected: every video but Spelling Garden goes to Instagram
+        length, limit = render.probe(job.dir / "out.mp4")["duration"], render.length_limit(job_game(job))
+        if limit is not None and length > limit:
             raise RuntimeError(f"this render runs {int(length // 60)}:{length % 60:04.1f} and Instagram takes at most 3:00: "
                                "send a note to cut some of the talk (or pick a faster speed), then Approve")
-        if poster.enabled():   # a name the schedule cannot use is refused before anything is saved under it
+        if post:   # a name the schedule cannot use is refused before anything is saved under it
             poster.puzzle_from_name(job.meta.get("title") or "", job_game(job))
             size = (job.dir / "out.mp4").stat().st_size
             if size > render.SHARE_LIMIT:
@@ -92,7 +100,9 @@ def approve(job):
             job.set(msg=f"saved to {path}")
         else:
             job.set(msg="no archive folder on this Mac (ARCHIVE_DIR unset, no Dropbox): not archived")
-        if poster.enabled():
+        if poster.enabled() and not post:
+            job.set(msg=f"the posting app does not take {job_game(job)} videos yet: saved, not scheduled")
+        if post:
             job.set(stage="scheduling", progress=10, msg="uploading to the posting app")
             cut = json.loads((job.dir / "cut.json").read_text())
             res = poster.schedule(job.dir / "out.mp4", meta.get("title") or "", job_game(job), cut.get("final_duration", 0),
