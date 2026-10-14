@@ -167,9 +167,10 @@ Tabs open in date order, then game, Daily before Hard. Chrome is addressed by pr
   drop day. With no solve the cut ends on the last word, as when a tone is missed, minus the
   `no_solve_detected` flag. It does not go to Instagram, so no 3:00 ceiling: a raw 8:45
   session comes out at 8:10, 1.0x. The 50 MiB cap still holds (about 0.8 Mbps at that
-  length; the game's flat art and the webcam stand it). The posting app does not take it yet
-  (`publish.ARCHIVE_ONLY`), so Approve only saves it to Dropbox; `<date>.mp4` names in that
-  folder are Jake's own, and the suffix keeps an approve from overwriting one.
+  length; the game's flat art and the webcam stand it). The posting app takes it as a third
+  game on the daily track (`poster.puzzle_from_name`), so it posts the morning after its
+  recording, TikTok only (that app's CLAUDE.md). `<date>.mp4` names in its Dropbox folder are
+  Jake's own, and the suffix keeps an approve from overwriting one.
 - **Filenames and folders are the archive's contract**: the job's name (worked out from
   the clip, or typed) becomes `<name>.mp4` in `Dropbox/twixtle/Dailies/`,
   `Dropbox/vowelsweeper/` or `Dropbox/spelling-garden/` by game. Save is refused with no name past the date. Delete

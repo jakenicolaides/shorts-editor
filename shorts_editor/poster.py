@@ -26,6 +26,7 @@ from .cancel import Token
 
 ROOT = Path(__file__).resolve().parent.parent
 NAME_RE = re.compile(r"^(\d{4}-\d{2}-\d{2}) ([a-z0-9]+(?:-[a-z0-9]+)*) (daily|hard)$")
+PRACTICE_RE = re.compile(r"^(\d{4}-\d{2}-\d{2}) spelling-garden$")   # no puzzle and no Hard: the app puts it on the daily track
 TRACK = {"daily": "daily", "hard": "bonus"}
 
 
@@ -50,6 +51,11 @@ def enabled() -> bool:
 def puzzle_from_name(name: str, game: str) -> dict:
     """The job's name IS the puzzle's identity (title.py writes it from the schedule,
     and it is what the reviewer sees and can correct), so it is what gets sent."""
+    if game == "spelling-garden":
+        m = PRACTICE_RE.match((name or "").strip().lower())
+        if not m:
+            raise ValueError("to schedule it, a Spelling Garden name must read <date> spelling-garden, e.g. 2026-10-12 spelling-garden")
+        return {"game": game, "track": "daily", "puzzle_date": m.group(1), "start_word": "", "end_word": "", "puzzle_key": ""}
     m = NAME_RE.match((name or "").strip().lower())
     if not m:
         raise ValueError("to schedule it, the name must read <date> <puzzle> <daily|hard>, e.g. 2026-09-19 pros-towed hard")
@@ -163,8 +169,11 @@ if __name__ == "__main__":
         "game": "twixtle", "track": "bonus", "puzzle_date": "2026-09-19", "start_word": "pros", "end_word": "towed", "puzzle_key": ""}
     assert puzzle_from_name("2026-09-15 Prove daily", "vowelsweeper")["puzzle_key"] == "prove"
     assert puzzle_from_name("2026-09-15 mists-2 daily", "vowelsweeper")["puzzle_key"] == "mists-2"   # a key with a collision suffix
+    assert puzzle_from_name("2026-10-12 Spelling-Garden", "spelling-garden") == {
+        "game": "spelling-garden", "track": "daily", "puzzle_date": "2026-10-12", "start_word": "", "end_word": "", "puzzle_key": ""}
     for bad, game in [("2026-09-19 pros-toad", "twixtle"), ("2026-09-19 pros hard", "twixtle"), ("pros-towed hard", "twixtle"),
-                      ("2026-09-19 pros-towed hard", "auto")]:
+                      ("2026-09-19 pros-towed hard", "auto"), ("2026-10-12 spelling-garden daily", "spelling-garden"),
+                      ("2026-10-12 pros-towed hard", "spelling-garden")]:
         try:
             puzzle_from_name(bad, game); raise SystemExit(f"accepted {bad!r}")
         except ValueError:

@@ -32,8 +32,8 @@ English until it is right, save it to Dropbox, post from the phone.
    there has the video, a Share button per platform and the caption ready to
    paste. Approving again after a re-edit replaces the scheduled video.
    Not connected to the posting app (no `POSTER_URL` in `.env`)? Then this step
-   only saves to Dropbox, as it always did. Spelling Garden is only saved to
-   Dropbox either way: the posting app does not take it yet.
+   only saves to Dropbox, as it always did. Spelling Garden posts the morning
+   after its recording date, with the Dailies, and only to TikTok.
 
 Closing the page quits the server and its Terminal window.
 
