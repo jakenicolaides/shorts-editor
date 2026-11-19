@@ -33,6 +33,32 @@ forward queue, which those sites guard. A token'd "list the schedule" endpoint w
 alternative and was rejected: it puts every future answer on each laptop that holds the
 token. Both are live (2026-09-23) and the ssh fallback that bridged the gap is gone.
 
+## Recorder takes (2026-11-19)
+
+**A take can arrive as two tracks instead of one clip.** The ambassador recorder (a page a
+presenter records in; the plan is `AMBASSADORS.md` in the Twixtle repo) records the game and
+the webcam SEPARATELY, the game as the browser tab cropped to it at whatever size it had on
+that person's screen. `compose.py` stacks them into the frame OBS always produced (1080x1920,
+webcam in the top 762, one mixed sound track) and **everything after that is unchanged**: it
+is the job's `input.mp4`, and the cut, the title read, the solve tone and the render see an
+ordinary clip. Checked against a real recording split in two: the same seven segments to
+within 0.04s, the same solve time, 25s of joining on a five minute take.
+
+- **Stacking is ours, not the browser's**, so the layout can change without anyone
+  re-recording and a weak laptop is not asked to composite while someone plays.
+- **The mix is a plain sum** (`amix normalize=0`): the default halves each input, which
+  drops the voice 6 dB before the loudness pass ever sees it.
+- **The recorder knows which puzzle it opened**, so the game is passed in, never guessed from
+  the sound. It does not know the puzzle's WORDS, so the name is still read off the clip and
+  checked against the schedule. Something that does know them passes a title, and then
+  nothing asks the model (`create_from_tracks` writes `title.json` itself).
+- **The recorder is a page on another address**, so the server names it
+  (`SHORTS_RECORDER_ORIGINS`, default the test page at `http://localhost:8795`) and answers
+  only that address across origins. Routes are in `server.py`'s header: two PUTs and a start.
+- **Not done yet**: the voice and the game's sound arrive apart and are mixed before
+  anything listens. Transcribing the microphone alone and finding the chime in the game's
+  sound alone would both be cleaner than what OBS ever gave.
+
 ## Posting (2026-09-19)
 
 **Posting stays manual and in-app, on purpose.** Posting through an API (Upload-Post) was

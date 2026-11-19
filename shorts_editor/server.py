@@ -16,6 +16,15 @@
   GET  /prepare               the recording checklist: every puzzle from yesterday on with its standing (via the posting app)
   POST /prepare               {"picks": [{game, track, date}], "profile"} -> one Chrome tab per ticked puzzle
   DELETE /jobs/<id>           cancel if running, then remove work/<id>/ (the Dropbox copy stays)
+
+A take from the RECORDER (the page a presenter records in) arrives as two tracks, not one clip:
+  PUT  /tracks/<take>/game?ext=   the game, recorded as the browser tab cropped to it (raw body)
+  PUT  /tracks/<take>/cam?ext=    the webcam and the microphone (raw body)
+  POST /tracks/<take>/start       {"game", "date", "track", "offset_ms"} -> a job like any other: compose.py
+                                  joins the two, and from there it is an ordinary clip
+<take> is any id the recorder makes up for the pair. The recorder is a page on ANOTHER address, so it
+is named in SHORTS_RECORDER_ORIGINS (default http://localhost:8795, the test page) and only that
+address may read this server's answers from a browser. Nobody else's page gains anything by this.
 """
 import json
 import os
@@ -26,7 +35,12 @@ from pathlib import Path
 
 from . import pipeline, poster
 
+import shutil
+
 ROOT = Path(__file__).resolve().parent.parent
+# The recorder's address(es): the only other origins a browser will let read this server.
+RECORDER_ORIGINS = {o.strip().rstrip("/") for o in (os.environ.get("SHORTS_RECORDER_ORIGINS") or "http://localhost:8795").split(",") if o.strip()}
+TRACK_EXT = ("mp4", "webm", "mov")
 PAGE_FILE = ROOT / "shorts_editor" / "page.html"  # read per request so edits need no restart
 PORT = int(os.environ.get("SHORTS_PORT", "8790"))
 
@@ -59,9 +73,38 @@ class H(BaseHTTPRequestHandler):
             return
         super().log_message(fmt, *args)
 
+    def _cors(self):
+        """Let the recorder's page, and no other, read this answer."""
+        origin = (self.headers.get("Origin") or "").rstrip("/")
+        if origin and origin in RECORDER_ORIGINS:
+            self.send_header("Access-Control-Allow-Origin", origin)
+            self.send_header("Vary", "Origin")
+            return True
+        return False
+
+    def do_OPTIONS(self):   # the browser asks first before a PUT or a JSON POST from another address
+        self.send_response(204)
+        if self._cors():
+            self.send_header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+            self.send_header("Access-Control-Allow-Headers", "Content-Type")
+            self.send_header("Access-Control-Max-Age", "600")
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
+    def _save_body(self, dst: Path, n: int):
+        with open(dst, "wb") as out:
+            remaining = n
+            while remaining > 0:
+                chunk = self.rfile.read(min(1 << 20, remaining))
+                if not chunk:
+                    break
+                out.write(chunk)
+                remaining -= len(chunk)
+
     def _json(self, data, code=200):
         body = json.dumps(data).encode()
         self.send_response(code)
+        self._cors()
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
@@ -121,6 +164,7 @@ class H(BaseHTTPRequestHandler):
                     end = size - 1
         length = end - start + 1
         self.send_response(206 if rng else 200)
+        self._cors()
         self.send_header("Content-Type", "video/mp4")
         self.send_header("Accept-Ranges", "bytes")
         self.send_header("Content-Length", str(length))
@@ -162,6 +206,9 @@ class H(BaseHTTPRequestHandler):
             if not body.get("dry"):   # dry: the test suite, which wants the list without a browser opening
                 prepare.open_in_chrome([l["url"] for l in r["links"]], body.get("profile") or None)
             return self._json({"opened": [l["label"] for l in r["links"]]})
+        m = re.match(r"^/tracks/([\w-]{6,64})/start$", self.path)
+        if m:
+            return self._start_tracks(m.group(1))
         m = re.match(r"^/jobs/([\w-]+)/(note|title|speed|approve|rerun|cancel)$", self.path)
         if not m:
             return self._json({"error": "not found"}, 404)
@@ -207,6 +254,34 @@ class H(BaseHTTPRequestHandler):
             _run_bg(job, lambda: publish.approve(job))
         return self._json({"ok": True})
 
+    def _start_tracks(self, take: str):
+        """Both tracks of a recorder's take are in: make the job and run it."""
+        n = int(self.headers.get("Content-Length") or 0)
+        try:
+            body = json.loads(self.rfile.read(n) or b"{}") if n else {}
+        except ValueError:
+            return self._json({"error": "bad json"}, 400)
+        d = pipeline.WORK / "_upload" / take
+        game_f = next(iter(sorted(d.glob("game.*"))), None)
+        cam_f = next(iter(sorted(d.glob("cam.*"))), None)
+        if not (game_f and cam_f):
+            return self._json({"error": "send both tracks first"}, 400)
+        game = body.get("game")
+        if game not in ("twixtle", "vowelsweeper"):
+            return self._json({"error": "which game?"}, 400)
+        date = str(body.get("date") or "")
+        if not re.match(r"^\d{4}-\d{2}-\d{2}$", date):
+            return self._json({"error": "which puzzle date?"}, 400)
+        try:
+            offset = float(body.get("offset_ms") or 0)
+        except (TypeError, ValueError):
+            offset = 0.0
+        puzzle = {"date": date, "track": "bonus" if body.get("track") == "bonus" else "daily"}
+        job = pipeline.Job.create_from_tracks(game_f, cam_f, game, puzzle, offset, title=(body.get("title") or "").strip())
+        shutil.rmtree(d, ignore_errors=True)
+        _run_bg(job, job.run)
+        return self._json({"id": job.id})
+
     def do_DELETE(self):
         m = re.match(r"^/jobs/([\w-]+)$", self.path)
         job = pipeline.Job(m.group(1)) if m else None
@@ -225,9 +300,21 @@ class H(BaseHTTPRequestHandler):
     def do_PUT(self):
         from urllib.parse import urlparse, parse_qs, unquote
         u = urlparse(self.path)
+        q = parse_qs(u.query)
+        m = re.match(r"^/tracks/([\w-]{6,64})/(game|cam)$", u.path)
+        if m:
+            ext = q.get("ext", ["mp4"])[0].lower()
+            n = int(self.headers.get("Content-Length") or 0)
+            if ext not in TRACK_EXT or n <= 0:
+                return self._json({"error": "a track is an mp4, webm or mov with something in it"}, 400)
+            d = pipeline.WORK / "_upload" / m.group(1)
+            d.mkdir(parents=True, exist_ok=True)
+            for old in d.glob(m.group(2) + ".*"):   # a second attempt at the same take replaces the first
+                old.unlink()
+            self._save_body(d / f"{m.group(2)}.{ext}", n)
+            return self._json({"ok": True, "bytes": n})
         if u.path != "/upload":
             return self._json({"error": "not found"}, 404)
-        q = parse_qs(u.query)
         name = Path(unquote(q.get("name", ["clip.mp4"])[0])).name
         speed = float(q.get("speed", ["1.0"])[0])
         game = q.get("game", ["auto"])[0]
@@ -240,21 +327,14 @@ class H(BaseHTTPRequestHandler):
         tmp = pipeline.WORK / "_upload"
         tmp.mkdir(parents=True, exist_ok=True)
         dst = tmp / name
-        with open(dst, "wb") as out:
-            remaining = n
-            while remaining > 0:
-                chunk = self.rfile.read(min(1 << 20, remaining))
-                if not chunk:
-                    break
-                out.write(chunk)
-                remaining -= len(chunk)
+        self._save_body(dst, n)
         job = pipeline.Job.create(dst, speed, game, name=name, title=title)
         dst.unlink(missing_ok=True)
         _run_bg(job, job.run)
         return self._json({"id": job.id})
 
 
-BUSY_STAGES = {"queued", "audio", "transcribe", "solve", "title", "cut", "loudness", "render", "editing", "saving", "scheduling"}
+BUSY_STAGES = {"queued", "compose", "audio", "transcribe", "solve", "title", "cut", "loudness", "render", "editing", "saving", "scheduling"}
 
 
 def _sweep_orphans():

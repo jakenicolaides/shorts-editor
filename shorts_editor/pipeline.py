@@ -1,5 +1,6 @@
 """Job orchestration. One directory per job under work/<id>/ holding:
-  input.<ext>      the raw clip (copied in)
+  input.<ext>      the raw clip (copied in), or the two tracks below joined into one
+  track_game.<ext> track_cam.<ext>   a recorder's take: the game and the webcam, recorded apart (compose.py)
   audio.wav        mono 16k
   transcript.json  whisper words
   params.json      current cut parameters
@@ -125,6 +126,52 @@ class Job:
         job.set(stage="queued", progress=0, msg=f"queued {src.name} (speed {speed}, game {game})")
         return job
 
+    @classmethod
+    def create_from_tracks(cls, game_src: Path, cam_src: Path, game: str, puzzle: dict = None,
+                           offset_ms: float = 0.0, title: str = None) -> "Job":
+        """A take from the recorder: the game and the webcam as two files (compose.py
+        joins them when the job runs). The recorder opened a particular puzzle, so the
+        game is known and is not guessed from the sound. `puzzle` is {date, track}.
+        A title is only passed by something that knows the puzzle's words; with none,
+        the name is read off the clip and checked against the schedule as usual."""
+        base = datetime.now().strftime("%Y-%m-%d-%H%M%S")
+        job_id, n = base, 2
+        while (WORK / job_id).exists():
+            job_id, n = f"{base}-{n}", n + 1
+        job = cls(job_id)
+        job.dir.mkdir(parents=True, exist_ok=False)
+        shutil.move(str(game_src), job.dir / ("track_game" + game_src.suffix.lower()))
+        shutil.move(str(cam_src), job.dir / ("track_cam" + cam_src.suffix.lower()))
+        puzzle = puzzle or {}
+        name = " ".join(x for x in (puzzle.get("date"), game, "recorder") if x)
+        _write(job.dir / "meta.json", {
+            "name": name, "title": (title or "").strip(), "game": game, "speed": 1.0, "created": time.time(),
+            "tracks": True, "offset_ms": float(offset_ms or 0), "puzzle": puzzle,
+        })
+        if (title or "").strip():   # named by the recorder: nothing to read off the clip
+            _write(job.dir / "title.json", {"title": title.strip(), "game": game, "read": None, "match": None, "why": None, "from": "recorder"})
+        _write(job.dir / "params.json", cutlist.Params(speed=1.0).to_dict())
+        _write(job.dir / "history.json", [])
+        job.set(stage="queued", progress=0, msg=f"queued a recorder take ({game}, {puzzle.get('date') or 'no date'})")
+        return job
+
+    def _track(self, which: str):
+        for p in self.dir.glob(f"track_{which}.*"):
+            return p
+        return None
+
+    def _compose(self) -> Path:
+        """Join a recorder's two tracks into the one clip everything else works on."""
+        from . import compose
+        game, cam = self._track("game"), self._track("cam")
+        if not (game and cam):
+            raise RuntimeError("this job has no clip and not both tracks: record it again")
+        self.set(stage="compose", progress=2, msg="joining the webcam and the game")
+        t0 = time.time()
+        out = compose.compose(game, cam, self.dir / "input.mp4", self.meta.get("offset_ms") or 0, token=self.token)
+        self.set(msg=f"joined in {time.time() - t0:.0f}s")
+        return out
+
     def run(self):
         try:
             self._run()
@@ -150,7 +197,7 @@ class Job:
 
     def _run(self):
         tok = self.token
-        src = self.input
+        src = self.input or self._compose()   # a recorder's take arrives as two tracks
         info = render.probe(src)
         _write(self.dir / "probe.json", info)
         self.set(stage="audio", progress=5, msg=f"probed: {info['duration']:.1f}s {info.get('width')}x{info.get('height')}")
