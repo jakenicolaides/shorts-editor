@@ -24,6 +24,7 @@ CAM_H = 762            # the webcam is the top 40% of the frame (the in-house la
 GAME_H = H - CAM_H
 GAME_BG = "0xf4f4f2"   # both games' page colour, for the bars when the game's shape differs
 FPS = 30               # the recorder caps both tracks at 30
+GAME_GAIN_DB = -2.0    # the game's own sounds sit a touch under the voice (Jake, by ear, 2026-11-19)
 
 
 def _has_audio(path: Path) -> bool:
@@ -55,7 +56,7 @@ def compose(game: Path, cam: Path, out: Path, offset_ms: float = 0.0, token: Tok
     ]
     if game_audio and cam_audio:
         # normalize=0: a plain sum. The default halves each input, which would drop the voice 6 dB
-        graph.append("[1:a][0:a]amix=inputs=2:duration=shortest:normalize=0[a]")
+        graph.append(f"[0:a]volume={GAME_GAIN_DB}dB[ga];[1:a][ga]amix=inputs=2:duration=shortest:normalize=0[a]")
         amap = "[a]"
     else:
         amap = "1:a" if cam_audio else "0:a"
