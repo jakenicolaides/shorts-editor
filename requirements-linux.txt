@@ -7,3 +7,4 @@ scipy
 anthropic
 pydantic
 boto3
+awslambdaric   # what lets the same image run as a Lambda function

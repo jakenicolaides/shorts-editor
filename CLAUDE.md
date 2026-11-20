@@ -82,11 +82,25 @@ in, a finished job folder out, no page.
   5; left alone, the two would disagree for a reason that has nothing to do with the machine.
 - **The sound goes in as samples, not a path.** Given a path faster-whisper decodes it with
   PyAV, and the PyAV that pip resolves today breaks that call.
-- **Time, on six cores of this Mac inside a Linux VM**: 3:36 for the 4:17 take (join 35s,
-  speech 128s, render 52s). A server's
-  cores are slower, so the first real run is what says whether a long take fits a 15 minute
-  limit. **Not done**: nothing here talks to S3 or a queue, and the name still wants the
-  posting app and the model unless a title is passed in.
+- **It runs on Lambda, timed 2026-11-20** (function `shorts-editor`, eu-west-1, ARM, 10 GB
+  which is what buys its 6 processors, 15 minute limit; `lambda_handler.py` is the entry,
+  set on the function, and the image is `shorts-editor` in ECR). A 4:17 take, warm: **4:18**
+  (join 51s, speech 127s, render 80s), about 3.5 cents, and the same 14 segments as the Mac
+  to within 0.02s. A 41 second take: 69s warm.
+- **A COLD start adds about 3 minutes 20**, nearly all of it the speech model being read
+  out of the image for the first time (speech took 202s cold against 29s warm on the same
+  take). Lambda fetches an image's blocks as they are touched, and 1.6 GB of weights touched
+  at random is the slow way to do it. Not fixed yet; fetching the model from S3 to /tmp at
+  start is the usual cure. Until then allow about 8 minutes for a first take of the evening.
+- **The function's role reaches `takes/` in `twixtle-shorts` and its own logs, nothing
+  else.** A take is `takes/<id>/game.*` and `cam.*`; the edit and the job's small files come
+  back under `takes/<id>/edit/`. **Not done**: nothing calls the function yet, nothing
+  expires `takes/`, a note has no way in, and the name wants a title passed in (no key for
+  the model or the posting app is on the function).
+- **Rebuild and ship**: `docker build -t shorts-editor .`, tag and push to the ECR
+  repository, then `aws lambda update-function-code --function-name shorts-editor
+  --image-uri <repo>:latest`. In zsh write `${ACCT}` in braces: `$ACCT:role` is read as a
+  modifier and eats the colon.
 
 ## Posting (2026-09-19)
 

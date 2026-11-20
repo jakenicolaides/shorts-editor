@@ -18,6 +18,9 @@ ENV HF_HUB_OFFLINE=1
 COPY shorts_editor ./shorts_editor
 COPY templates ./templates
 
-ENV SHORTS_WORK=/work PYTHONUNBUFFERED=1
-RUN mkdir -p /work
+ENV SHORTS_WORK=/work PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
+RUN mkdir -p /work && python -m compileall -q shorts_editor
+# Run by hand it edits two files (worker.py). As a Lambda function the same image is
+# started as `python -m awslambdaric shorts_editor.lambda_handler.handler`, set on the
+# function, with SHORTS_WORK=/tmp/work because nothing else is writable there.
 ENTRYPOINT ["python", "-m", "shorts_editor.worker"]
