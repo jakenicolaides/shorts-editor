@@ -11,6 +11,11 @@ and writes s3://<bucket>/takes/<take>/edit/out.mp4  plus the job's small files
 (transcript, cut, settings, status), which are what a later note needs to change
 the edit without transcribing again.
 
+LAST of all it writes edit/result.json: how it ended, in a few fields. That file
+is the signal. Whoever started the edit did not wait for it (the function runs for
+minutes), so they watch for result.json; it is written when the edit fails too,
+with the reason, so a failure is told apart from an edit still running.
+
 The function's role may touch takes/ in that one bucket and nothing else, and it
 is the only thing here that holds AWS access: the recorder's page is handed a
 link to upload to and a link to watch, never a key.
@@ -71,6 +76,27 @@ def _fetch_model(s3) -> float:
 
 
 def handler(event, context=None):
+    """Run the edit, and say how it ended in result.json whichever way that was."""
+    import boto3
+    take = str((event or {}).get("take") or "")
+    try:
+        res = _edit(event)
+    except Exception as e:
+        res = {"stage": "failed", "error": str(e)[:300]}
+        if re.fullmatch(r"[A-Za-z0-9_-]{6,64}", take):
+            _result(boto3.client("s3"), take, res)
+        raise
+    _result(boto3.client("s3"), take, res)
+    return res
+
+
+def _result(s3, take: str, res: dict):
+    body = {k: res.get(k) for k in ("stage", "error", "final_duration", "flags", "title", "seconds")}
+    s3.put_object(Bucket=BUCKET, Key=f"{PREFIX}{take}/edit/result.json", Body=json.dumps(body).encode(),
+                  ContentType="application/json")
+
+
+def _edit(event):
     import boto3
     take = str(event.get("take") or "")
     if not re.fullmatch(r"[A-Za-z0-9_-]{6,64}", take):   # it becomes part of a key: nothing that can climb out of takes/
