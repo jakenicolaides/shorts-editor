@@ -11,6 +11,16 @@ and writes s3://<bucket>/takes/<take>/edit/out.mp4  plus the job's small files
 (transcript, cut, settings, status), which are what a later note needs to change
 the edit without transcribing again.
 
+With "note" in the event it does not edit from scratch: it re-opens the edit this
+take already has (the small files it left under edit/), asks the model what the
+note means for the cut, and renders again. Nothing is transcribed twice. The key
+for the model is the function's own (ANTHROPIC_API_KEY in its settings): the page
+a presenter uses never holds it.
+
+"run" is whatever the caller sent, handed back in result.json, so the caller can
+tell this run's verdict from the last one's (a take that is changed has an old
+result.json sitting there already).
+
 LAST of all it writes edit/result.json: how it ended, in a few fields. That file
 is the signal. Whoever started the edit did not wait for it (the function runs for
 minutes), so they watch for result.json; it is written when the edit fails too,
@@ -79,13 +89,15 @@ def handler(event, context=None):
     """Run the edit, and say how it ended in result.json whichever way that was."""
     import boto3
     take = str((event or {}).get("take") or "")
+    run = str((event or {}).get("run") or "")[:32]
     try:
-        res = _edit(event)
+        res = _note(event) if (event or {}).get("note") else _edit(event)
     except Exception as e:
-        res = {"stage": "failed", "error": str(e)[:300]}
+        res = {"stage": "failed", "error": str(e)[:300], "run": run}
         if re.fullmatch(r"[A-Za-z0-9_-]{6,64}", take):
             _result(boto3.client("s3"), take, res)
         raise
+    res["run"] = run
     _result(boto3.client("s3"), take, res)
     return res
 
@@ -109,19 +121,94 @@ def _cpu() -> str:
 
 def _result(s3, take: str, res: dict):
     res.setdefault("cpu", _cpu())
-    body = {k: res.get(k) for k in ("stage", "error", "final_duration", "flags", "title", "seconds", "cpu")}
+    body = {k: res.get(k) for k in ("stage", "error", "final_duration", "flags", "title", "seconds", "cpu", "run", "reply", "changed")}
     s3.put_object(Bucket=BUCKET, Key=f"{PREFIX}{take}/edit/result.json", Body=json.dumps(body).encode(),
                   ContentType="application/json")
 
 
-def _edit(event):
-    import boto3
+def _checked(event):
     take = str(event.get("take") or "")
     if not re.fullmatch(r"[A-Za-z0-9_-]{6,64}", take):   # it becomes part of a key: nothing that can climb out of takes/
         raise ValueError("take must be 6 to 64 letters, digits, - or _")
     game = str(event.get("game") or "")
     if game not in ("twixtle", "vowelsweeper"):
         raise ValueError("game must be twixtle or vowelsweeper")
+    return take, game
+
+
+def _upload(s3, job_dir: Path, base: str):
+    for name in KEEP:
+        f = job_dir / name
+        if f.exists():
+            s3.upload_file(str(f), BUCKET, f"{base}edit/{name}",
+                           ExtraArgs={"ContentType": "video/mp4" if name.endswith(".mp4") else
+                                      "application/json" if name.endswith(".json") else "text/plain"})
+
+
+def change(job_id: str, note: str) -> dict:
+    """Apply a note to a job folder that holds a take's tracks and the small files of
+    its edit, but neither its sound nor its picture: those are made again here, from
+    the same tracks by the same code, which is quicker than fetching them."""
+    from . import pipeline, transcribe
+    job = pipeline.Job(job_id)
+    job._mix()
+    transcribe.extract_audio(job.dir / "mix.wav", job.dir / "audio.wav")   # the cut snaps its ends to this
+    t0 = time.time()
+    try:
+        reply = job.apply_note(note)
+    except Exception:
+        reply = None   # apply_note has already written the failure into the job's status
+    st = job.status()
+    cut = pipeline._read(job.dir / "cut.json") or {}
+    return {"job": job.id, "stage": st.get("stage"), "error": st.get("error"), "seconds": round(time.time() - t0, 1),
+            "final_duration": cut.get("final_duration"), "flags": cut.get("flags"), "title": job.meta.get("title"),
+            "reply": (reply or "")[:700],
+            "changed": (job.dir / "out.mp4").exists(),   # the folder starts without a render: one here was made by this note
+            "log": st.get("log", [])}
+
+
+def _note(event):
+    """Change an edit this take already has, as a note asks."""
+    import boto3
+    take, _game = _checked(event)
+    note = " ".join(str(event.get("note") or "").split())[:600]
+    if len(note) < 3:
+        raise ValueError("the note is empty")
+    s3 = boto3.client("s3")
+    base = f"{PREFIX}{take}/"
+    work = Path(os.environ.get("SHORTS_WORK", "/tmp/work"))
+    shutil.rmtree(work, ignore_errors=True)   # a warm container still has the last take's files
+    job_dir = work / take
+    job_dir.mkdir(parents=True)
+
+    t0 = time.time()
+    tracks = set()
+    for obj in s3.list_objects_v2(Bucket=BUCKET, Prefix=base).get("Contents", []):
+        key = obj["Key"]
+        m = re.fullmatch(re.escape(base) + r"(game|cam)\.(mp4|webm|mov|mkv)", key)
+        if m:
+            s3.download_file(BUCKET, key, str(job_dir / f"track_{m.group(1)}.{m.group(2)}"))
+            tracks.add(m.group(1))
+        elif key.startswith(base + "edit/") and key.endswith(".json") and key.rsplit("/", 1)[1] in KEEP:
+            s3.download_file(BUCKET, key, str(job_dir / key.rsplit("/", 1)[1]))
+    if tracks != {"game", "cam"}:
+        raise FileNotFoundError(f"takes/{take}/ has lost a track: record it again")
+    for need in ("transcript.json", "cut.json", "params.json", "probe.json", "meta.json"):
+        if not (job_dir / need).exists():
+            raise FileNotFoundError("this take has no edit to change yet")
+    fetched = time.time() - t0
+
+    res = change(take, note)
+    res["seconds_fetch"] = round(fetched, 1)
+    job_dir = work / take
+    _upload(s3, job_dir, base)
+    shutil.rmtree(work, ignore_errors=True)
+    return res
+
+
+def _edit(event):
+    import boto3
+    take, game = _checked(event)
 
     s3 = boto3.client("s3")
     base = f"{PREFIX}{take}/"
@@ -149,12 +236,7 @@ def _edit(event):
 
     t1 = time.time()
     job_dir = Path(res["dir"])
-    for name in KEEP:
-        f = job_dir / name
-        if f.exists():
-            s3.upload_file(str(f), BUCKET, f"{base}edit/{name}",
-                           ExtraArgs={"ContentType": "video/mp4" if name.endswith(".mp4") else
-                                      "application/json" if name.endswith(".json") else "text/plain"})
+    _upload(s3, job_dir, base)
     res["seconds_fetch"], res["seconds_store"] = round(fetched, 1), round(time.time() - t1, 1)
     res["seconds_model"] = model_seconds
     res["edit"] = f"s3://{BUCKET}/{base}edit/out.mp4" if (job_dir / "out.mp4").exists() else None
