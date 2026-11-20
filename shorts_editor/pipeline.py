@@ -14,7 +14,6 @@
 import json
 import os
 import shutil
-import threading
 import time
 import traceback
 from datetime import datetime
@@ -161,53 +160,34 @@ class Job:
             return p
         return None
 
-    def _compose_begin(self):
-        """Start joining a recorder's two tracks into the one clip everything else works
-        on, and return a function that waits for it and hands the clip back.
+    def tracks(self):
+        """This job as a recorder take (compose.Tracks), or None when it is an ordinary
+        clip or its sound has not been mixed yet."""
+        from . import compose
+        game, cam, sound = self._track("game"), self._track("cam"), self.dir / "mix.wav"
+        if not (game and cam and sound.exists()):
+            return None
+        return compose.Tracks(game, cam, sound, self.meta.get("offset_ms") or 0)
 
-        The sound is mixed first (seconds) and becomes audio.wav straight away, so the
-        slow step that only needs sound, the transcription, can run WHILE the picture is
-        being joined instead of after it. Both are children of this job's token, so a
-        cancel stops both.
+    @property
+    def source(self):
+        """What the render, the loudness pass and the title read work from: the one clip
+        (an OBS recording, or a take joined before 2026-11-20), else the take's tracks."""
+        return self.input or self.tracks()
 
-        ONLY where Whisper runs on the graphics chip (a Mac): there the two want
-        different things and a 1:44 take went from 49s to 39s. On a server both want
-        every processor, and timed on Lambda a 4:17 take got SLOWER together (4:53
-        against 4:18 one after the other; speech took 211s beside the join, 127s alone).
-        So everywhere else the join is waited for before anything else starts."""
+    def _mix(self):
+        """A recorder's take arrives as two tracks. Mix its sound: that one wav is what is
+        transcribed, measured and rendered, so all three agree by construction. The
+        picture is not touched until the render, which stacks and cuts it in one pass."""
         from . import compose
         game, cam = self._track("game"), self._track("cam")
         if not (game and cam):
             raise RuntimeError("this job has no clip and not both tracks: record it again")
-        self.set(stage="compose", progress=2, msg="joining the webcam and the game")
-        t0 = time.time()
-        off = self.meta.get("offset_ms") or 0
-        sound = compose.mix(game, cam, self.dir / "mix.wav", off, token=self.token)
-        wav = self.dir / "audio.wav"
-        if not wav.exists():
-            transcribe.extract_audio(sound, wav, token=self.token)
-        box = {}
-
-        def work():
-            try:
-                box["out"] = compose.compose(game, cam, self.dir / "input.mp4", off, token=self.token, sound=sound)
-            except BaseException as e:   # handed to whoever waits: a thread's own traceback helps nobody
-                box["err"] = e
-            box["took"] = time.time() - t0   # the join's own time, not how long it was waited for
-
-        th = threading.Thread(target=work, daemon=True)
-        th.start()
-        if transcribe.backend() != "mlx":
-            th.join()
-
-        def wait() -> Path:
-            th.join()
-            sound.unlink(missing_ok=True)
-            if "err" in box:
-                raise box["err"]
-            self.set(msg=f"joined in {box['took']:.0f}s")
-            return box["out"]
-        return wait
+        self.set(stage="compose", progress=2, msg="mixing the webcam's sound and the game's")
+        sound = self.dir / "mix.wav"
+        if not sound.exists():
+            compose.mix(game, cam, sound, self.meta.get("offset_ms") or 0, token=self.token)
+        return self.tracks()
 
     def run(self):
         try:
@@ -236,15 +216,15 @@ class Job:
         tok = self.token
         wav = self.dir / "audio.wav"
         src = self.input
-        joined = None
-        if src is None:   # a recorder's take arrives as two tracks: its sound is ready long before its picture
-            joined = self._compose_begin()
+        if src is None:
+            src = self._mix()
+            info = {"duration": src.duration(), "width": 1080, "height": 1920, "fps": "30/1"}
         else:
             info = render.probe(src)
-            _write(self.dir / "probe.json", info)
-            self.set(stage="audio", progress=5, msg=f"probed: {info['duration']:.1f}s {info.get('width')}x{info.get('height')}")
-            if not wav.exists():
-                transcribe.extract_audio(src, wav, token=tok)
+        _write(self.dir / "probe.json", info)
+        self.set(stage="audio", progress=5, msg=f"probed: {info['duration']:.1f}s {info.get('width')}x{info.get('height')}")
+        if not wav.exists():
+            transcribe.extract_audio(getattr(src, "sound", src), wav, token=tok)
         self.set(stage="transcribe", progress=10, msg="transcribing")
 
         tpath = self.dir / "transcript.json"
@@ -252,11 +232,6 @@ class Job:
             t0 = time.time()
             t = transcribe.transcribe_killable(wav, tpath, tok, on_wait=lambda: self.set(msg="waiting for another clip's transcription to finish"))
             self.set(msg=f"transcribed {len(t['words'])} words in {time.time() - t0:.0f}s")
-        if joined is not None:
-            src = joined()
-            info = render.probe(src)
-            _write(self.dir / "probe.json", info)
-            self.set(msg=f"probed: {info['duration']:.1f}s {info.get('width')}x{info.get('height')}")
         self.set(stage="solve", progress=40)
 
         game = self.meta.get("game") or "auto"
@@ -322,7 +297,7 @@ class Job:
             _, solve_at, _ = solvetone.detect_any(self.dir / "audio.wav")
         recorded = title.recorded_on(self.meta.get("name"), self.id[:10])
         try:
-            res = title.infer(self.input, self.dir, duration, solve_at, game, recorded, token=self.token)
+            res = title.infer(self.source, self.dir, duration, solve_at, game, recorded, token=self.token)
         except Cancelled:
             raise
         except Exception as e:
@@ -414,7 +389,7 @@ class Job:
     def rerender(self):
         tok = self.token
         tok.check()
-        src = self.input
+        src = self.source
         cut = _read(self.dir / "cut.json")
         p = _read(self.dir / "params.json")
         speed = float(p.get("speed", 1.0))

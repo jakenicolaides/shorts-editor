@@ -42,13 +42,26 @@ def _atempo_chain(speed: float) -> str:
     return ",".join(parts)
 
 
-def _graph(keep, speed, loud=None, video=True):
+def _is_tracks(src) -> bool:
+    return hasattr(src, "inputs")   # compose.Tracks: a recorder take, two pictures and one sound
+
+
+def _graph(keep, speed, loud=None, video=True, tracks=False):
+    """tracks: the source is a recorder take (compose.Tracks) rather than one clip. Its
+    picture is stacked here, once, and each kept stretch is cut from that; its sound is
+    input 2, or input 0 when only the sound was opened (video=False)."""
     n = len(keep)
     parts = []
+    asrc = "[2:a]" if (tracks and video) else "[0:a]"
+    if tracks and video:
+        from .compose import stack_filters
+        parts += stack_filters("st")
+        parts.append("[st]split=" + str(n) + "".join(f"[s{i}]" for i in range(n)))
     for i, (s, e) in enumerate(keep):
         if video:
-            parts.append(f"[0:v]trim=start={s:.3f}:end={e:.3f},setpts=PTS-STARTPTS[v{i}]")
-        parts.append(f"[0:a]atrim=start={s:.3f}:end={e:.3f},asetpts=PTS-STARTPTS[a{i}]")
+            vsrc = f"[s{i}]" if tracks else "[0:v]"
+            parts.append(f"{vsrc}trim=start={s:.3f}:end={e:.3f},setpts=PTS-STARTPTS[v{i}]")
+        parts.append(f"{asrc}atrim=start={s:.3f}:end={e:.3f},asetpts=PTS-STARTPTS[a{i}]")
     if video:
         ins = "".join(f"[v{i}][a{i}]" for i in range(n))
         parts.append(f"{ins}concat=n={n}:v=1:a=1[vc][ac]")
@@ -71,7 +84,7 @@ def _graph(keep, speed, loud=None, video=True):
 
 def measure_loudness(src: Path, keep, speed, token: Token = None) -> dict:
     """First loudnorm pass on the cut + sped audio only."""
-    cmd = ["ffmpeg", "-hide_banner", "-nostats", "-i", str(src),
+    cmd = ["ffmpeg", "-hide_banner", "-nostats", "-i", str(src.sound if _is_tracks(src) else src),
            "-filter_complex", _graph(keep, speed, None, video=False),
            "-map", "[aout]", "-f", "null", "-"]
     r = (token or Token()).run(cmd)
@@ -90,8 +103,10 @@ def video_maxrate_kbps(duration_s: float) -> int:
 def render(src: Path, keep, speed, out: Path, loud: dict, crf: int = 18, on_progress=None, token: Token = None) -> Path:
     duration = sum(e - s_ for s_, e in keep) / max(speed, 0.01)
     maxrate = video_maxrate_kbps(duration)
-    cmd = ["ffmpeg", "-y", "-hide_banner", "-nostats", "-progress", "pipe:1", "-i", str(src),
-           "-filter_complex", _graph(keep, speed, loud, video=True),
+    tracks = _is_tracks(src)
+    cmd = ["ffmpeg", "-y", "-hide_banner", "-nostats", "-progress", "pipe:1",
+           *(src.inputs() if tracks else ["-i", str(src)]),
+           "-filter_complex", _graph(keep, speed, loud, video=True, tracks=tracks),
            "-map", "[vout]", "-map", "[aout]",
            "-c:v", "libx264", "-preset", "medium", "-crf", str(crf), "-profile:v", "high",
            "-level", "4.2", "-pix_fmt", "yuv420p", "-movflags", "+faststart",

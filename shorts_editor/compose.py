@@ -90,10 +90,71 @@ def mix(game: Path, cam: Path, out_wav: Path, offset_ms: float = 0.0, token: Tok
     return out_wav
 
 
+def stack_filters(out: str = "st", game: str = "0:v", cam: str = "1:v") -> list:
+    """The picture: the webcam over the game, as ffmpeg filters ending in [out]. The one
+    statement of the layout, used by the join below and by the render (render.py)."""
+    return [
+        # the webcam fills its panel and is cropped to it; the game is fitted whole inside its own
+        f"[{cam}]fps={FPS},scale={W}:{CAM_H}:force_original_aspect_ratio=increase:flags=lanczos,crop={W}:{CAM_H},setsar=1[_cam]",
+        f"[{game}]fps={FPS},scale={W}:{GAME_H}:force_original_aspect_ratio=decrease:flags=lanczos,"
+        f"pad={W}:{GAME_H}:(ow-iw)/2:(oh-ih)/2:color={GAME_BG},setsar=1[_game]",
+        f"[_cam][_game]vstack=inputs=2:shortest=1,format=yuv420p[{out}]",
+    ]
+
+
+class Tracks:
+    """A recorder take as the rest of the editor uses it: the two picture tracks as they
+    were recorded, and the one mixed sound track (mix, above).
+
+    There is no joined clip. There used to be: the two were stacked and encoded into
+    one file, which the render then decoded and encoded again. That first encode was a
+    fifth of the whole edit on the server and bought nothing, so the render now stacks
+    the picture itself, in the same pass that cuts it."""
+
+    def __init__(self, game: Path, cam: Path, sound: Path, offset_ms: float = 0.0):
+        self.game, self.cam, self.sound = Path(game), Path(cam), Path(sound)
+        self.off = max(-5.0, min(5.0, float(offset_ms or 0) / 1000.0))   # the webcam started this much later (s)
+
+    # the later track is delayed, as in mix(): sound and picture must agree about that
+    @property
+    def game_delay(self) -> float: return max(-self.off, 0.0)
+    @property
+    def cam_delay(self) -> float: return max(self.off, 0.0)
+
+    def inputs(self) -> list:
+        """ffmpeg input arguments: 0 = game, 1 = webcam, 2 = the mixed sound."""
+        return ["-itsoffset", f"{self.game_delay:.3f}", "-i", str(self.game),
+                "-itsoffset", f"{self.cam_delay:.3f}", "-i", str(self.cam),
+                "-i", str(self.sound)]
+
+    def duration(self) -> float:
+        """How long the take is: the shortest of the two pictures (as delayed) and the sound."""
+        def dur(path, stream):
+            r = subprocess.run(["ffprobe", "-v", "error", "-select_streams", stream, "-show_entries", "stream=duration:format=duration",
+                                "-of", "json", str(path)], capture_output=True, text=True, check=True)
+            import json
+            j = json.loads(r.stdout)
+            d = (j.get("streams") or [{}])[0].get("duration") or j["format"]["duration"]
+            return float(d)
+        return min(dur(self.game, "v:0") + self.game_delay, dur(self.cam, "v:0") + self.cam_delay, dur(self.sound, "a:0"))
+
+    def frame(self, t: float, out: Path, token: Token = None, width: int = 720) -> Path:
+        """One frame of the finished layout at time t, for reading the puzzle off the picture."""
+        cmd = ["ffmpeg", "-y", "-v", "error",
+               "-ss", f"{max(t - self.game_delay, 0):.2f}", "-i", str(self.game),
+               "-ss", f"{max(t - self.cam_delay, 0):.2f}", "-i", str(self.cam),
+               "-filter_complex", ";".join(stack_filters("st")) + f";[st]scale={width}:-2[f]",
+               "-map", "[f]", "-frames:v", "1", "-pix_fmt", "yuvj420p", str(out)]
+        (token or Token()).run(cmd, check=True)
+        return out
+
+
 def compose(game: Path, cam: Path, out: Path, offset_ms: float = 0.0, token: Token = None, sound: Path = None) -> Path:
     """Stack `cam` over `game` into `out`. offset_ms is how much LATER the webcam
     recording started than the game recording (negative: earlier), as the recorder
     measured it; the later one is delayed by that much so the two stay in step.
+    The editor itself no longer does this (it renders from the Tracks, above): this is
+    for looking at a take as one file, by hand.
     Two runs: the sound first (mix), then the picture with that sound laid beside it.
     `sound` is a mix already made (the pipeline makes it early, to transcribe while the
     picture is still being joined); it is the caller's file and is left alone.
@@ -108,13 +169,7 @@ def compose(game: Path, cam: Path, out: Path, offset_ms: float = 0.0, token: Tok
            "-itsoffset", f"{max(-off, 0):.3f}", "-i", str(game),
            "-itsoffset", f"{max(off, 0):.3f}", "-i", str(cam),
            "-i", str(sound)]
-    graph = [
-        # the webcam fills its panel and is cropped to it; the game is fitted whole inside its own
-        f"[1:v]fps={FPS},scale={W}:{CAM_H}:force_original_aspect_ratio=increase:flags=lanczos,crop={W}:{CAM_H},setsar=1[cam]",
-        f"[0:v]fps={FPS},scale={W}:{GAME_H}:force_original_aspect_ratio=decrease:flags=lanczos,"
-        f"pad={W}:{GAME_H}:(ow-iw)/2:(oh-ih)/2:color={GAME_BG},setsar=1[game]",
-        "[cam][game]vstack=inputs=2:shortest=1,format=yuv420p[v]",
-    ]
+    graph = stack_filters("v")
     tmp = out.with_name(out.stem + ".tmp" + out.suffix)
     cmd += ["-filter_complex", ";".join(graph), "-map", "[v]", "-map", "2:a",
             # an intermediate, re-encoded once more by the render: near-lossless, and quick

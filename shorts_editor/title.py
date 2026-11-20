@@ -87,7 +87,9 @@ def title_for(game: str, row: dict) -> str:
 
 
 # ---- the frame ------------------------------------------------------------------
-def grab_frame(src: Path, t: float, out: Path, token: Token = None) -> Path:
+def grab_frame(src, t: float, out: Path, token: Token = None) -> Path:
+    if hasattr(src, "frame"):   # a recorder take (compose.Tracks): the frame is stacked from its two tracks
+        return src.frame(t, out, token)
     (token or Token()).run(["ffmpeg", "-y", "-v", "error", "-ss", f"{max(t, 0):.2f}", "-i", str(src),
                             "-frames:v", "1", "-vf", "scale=720:-2", "-pix_fmt", "yuvj420p", str(out)], check=True)
     return out
