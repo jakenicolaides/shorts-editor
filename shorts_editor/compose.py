@@ -24,6 +24,7 @@ CAM_H = 762            # the webcam is the top 40% of the frame (the in-house la
 GAME_H = H - CAM_H
 GAME_BG = "0xf4f4f2"   # both games' page colour, for the bars when the game's shape differs
 FPS = 30               # the recorder caps both tracks at 30
+AUDIO_RATE = 48000
 GAME_GAIN_DB = -2.0    # the game's own sounds sit a touch under the voice (Jake, by ear, 2026-11-19)
 
 
@@ -33,20 +34,76 @@ def _has_audio(path: Path) -> bool:
     return bool(r.stdout.strip())
 
 
-def compose(game: Path, cam: Path, out: Path, offset_ms: float = 0.0, token: Token = None) -> Path:
-    """Stack `cam` over `game` into `out`. offset_ms is how much LATER the webcam
-    recording started than the game recording (negative: earlier), as the recorder
-    measured it; the later one is delayed by that much so the two stay in step.
-    Written beside `out` and moved into place, so a cancelled run never leaves a
-    short file that looks finished."""
+def _sound_faults(path: Path) -> float:
+    """Seconds by which the file's sound packets depart from a steady clock: sound that
+    its timestamps say is missing, or packets piled onto one instant. A sound track
+    should have none, and everything after this step trusts that it has none."""
+    r = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "a:0", "-show_entries", "packet=pts_time",
+                        "-of", "csv=p=0", str(path)], capture_output=True, text=True)
+    pts = []
+    for line in r.stdout.splitlines():
+        try:
+            pts.append(float(line.split(",")[0]))
+        except ValueError:
+            pass
+    step = 1024 / AUDIO_RATE   # one AAC packet
+    return sum(abs(b - a - step) for a, b in zip(pts, pts[1:]) if abs(b - a - step) > 0.5 * step)
+
+
+def mix(game: Path, cam: Path, out_wav: Path, offset_ms: float = 0.0, token: Token = None) -> Path:
+    """The take's one sound track, as a wav: the voice, with the game's own sounds under it.
+
+    Made on its own, with no picture in the same ffmpeg run, and as a wav, which is
+    samples in a row with no timestamps to go wrong. Both of those are the fix for a
+    real fault (Jake's first take on the live recorder, 2026-11-20): mixed inside the
+    same run as the picture, the sound came out with a hole or a pile-up a quarter of
+    a second in, and the voice ran up to 1.5 s out until the first cut.
+
+    Each track is first laid on the clock from zero (aresample async, first_pts=0):
+    silence up to where it really starts and across any hole in it, so the mixer, which
+    goes by the ORDER samples arrive in and not by their timestamps, is handed two
+    tracks that already agree about when zero is."""
     tok = token or Token()
     game_audio, cam_audio = _has_audio(game), _has_audio(cam)
     if not (game_audio or cam_audio):
         raise RuntimeError("neither track has any sound: the microphone was not recorded")
-    off = max(-5.0, min(5.0, float(offset_ms or 0) / 1000.0))   # a few ms in practice; a wild value is a bug, not a delay
+    off = max(-5.0, min(5.0, float(offset_ms or 0) / 1000.0))
+    lay = f"aresample={AUDIO_RATE}:async=1:first_pts=0"
+    if game_audio and cam_audio:
+        # normalize=0: a plain sum. The default halves each input, which would drop the voice 6 dB
+        graph = f"[0:a]{lay},volume={GAME_GAIN_DB}dB[ga];[1:a]{lay}[ca];[ca][ga]amix=inputs=2:duration=shortest:normalize=0[a]"
+    else:
+        graph = f"[{1 if cam_audio else 0}:a]{lay}[a]"
+    tmp = out_wav.with_name(out_wav.stem + ".tmp.wav")
     cmd = ["ffmpeg", "-y", "-v", "error",
            "-itsoffset", f"{max(-off, 0):.3f}", "-i", str(game),
-           "-itsoffset", f"{max(off, 0):.3f}", "-i", str(cam)]
+           "-itsoffset", f"{max(off, 0):.3f}", "-i", str(cam),
+           "-filter_complex", graph, "-map", "[a]", "-vn",
+           "-c:a", "pcm_s16le", "-ar", str(AUDIO_RATE), "-ac", "2", str(tmp)]
+    try:
+        tok.run(cmd, check=True)
+        os.replace(tmp, out_wav)
+    except subprocess.CalledProcessError as e:
+        raise RuntimeError("could not mix the two tracks' sound: " + (e.stderr or "").strip()[-400:])
+    finally:
+        tmp.unlink(missing_ok=True)
+    return out_wav
+
+
+def compose(game: Path, cam: Path, out: Path, offset_ms: float = 0.0, token: Token = None) -> Path:
+    """Stack `cam` over `game` into `out`. offset_ms is how much LATER the webcam
+    recording started than the game recording (negative: earlier), as the recorder
+    measured it; the later one is delayed by that much so the two stay in step.
+    Two runs: the sound first (mix), then the picture with that sound laid beside it.
+    Written beside `out` and moved into place, so a cancelled run never leaves a
+    short file that looks finished."""
+    tok = token or Token()
+    off = max(-5.0, min(5.0, float(offset_ms or 0) / 1000.0))   # a few ms in practice; a wild value is a bug, not a delay
+    sound = mix(game, cam, out.with_name(out.stem + ".mix.wav"), offset_ms, tok)
+    cmd = ["ffmpeg", "-y", "-v", "error",
+           "-itsoffset", f"{max(-off, 0):.3f}", "-i", str(game),
+           "-itsoffset", f"{max(off, 0):.3f}", "-i", str(cam),
+           "-i", str(sound)]
     graph = [
         # the webcam fills its panel and is cropped to it; the game is fitted whole inside its own
         f"[1:v]fps={FPS},scale={W}:{CAM_H}:force_original_aspect_ratio=increase:flags=lanczos,crop={W}:{CAM_H},setsar=1[cam]",
@@ -54,25 +111,23 @@ def compose(game: Path, cam: Path, out: Path, offset_ms: float = 0.0, token: Tok
         f"pad={W}:{GAME_H}:(ow-iw)/2:(oh-ih)/2:color={GAME_BG},setsar=1[game]",
         "[cam][game]vstack=inputs=2:shortest=1,format=yuv420p[v]",
     ]
-    if game_audio and cam_audio:
-        # normalize=0: a plain sum. The default halves each input, which would drop the voice 6 dB
-        graph.append(f"[0:a]volume={GAME_GAIN_DB}dB[ga];[1:a][ga]amix=inputs=2:duration=shortest:normalize=0[a]")
-        amap = "[a]"
-    else:
-        amap = "1:a" if cam_audio else "0:a"
     tmp = out.with_name(out.stem + ".tmp" + out.suffix)
-    cmd += ["-filter_complex", ";".join(graph), "-map", "[v]", "-map", amap,
+    cmd += ["-filter_complex", ";".join(graph), "-map", "[v]", "-map", "2:a",
             # an intermediate, re-encoded once more by the render: near-lossless, and quick
             "-c:v", "libx264", "-preset", "veryfast", "-crf", "14", "-r", str(FPS),
-            "-c:a", "aac", "-b:a", "256k", "-ar", "48000", "-ac", "2",
+            "-c:a", "aac", "-b:a", "256k", "-ar", str(AUDIO_RATE), "-ac", "2",
             "-shortest", "-movflags", "+faststart", str(tmp)]
     try:
         tok.run(cmd, check=True)
+        bad = _sound_faults(tmp)
+        if bad > 0.1:   # never hand on a clip whose sound and picture have parted
+            raise RuntimeError(f"the joined clip's sound is {bad:.2f}s off a steady clock")
         os.replace(tmp, out)
     except subprocess.CalledProcessError as e:
         raise RuntimeError("could not join the two tracks: " + (e.stderr or "").strip()[-400:])
     finally:
         tmp.unlink(missing_ok=True)
+        sound.unlink(missing_ok=True)
     return out
 
 
