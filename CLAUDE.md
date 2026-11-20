@@ -94,16 +94,18 @@ in, a finished job folder out, no page.
   5; left alone, the two would disagree for a reason that has nothing to do with the machine.
 - **The sound goes in as samples, not a path.** Given a path faster-whisper decodes it with
   PyAV, and the PyAV that pip resolves today breaks that call.
-- **It runs on Lambda** (function `shorts-editor`, eu-west-1, ARM, 10 GB which is what buys
-  its 6 processors, 15 minute limit; `lambda_handler.py` is the entry, set on the function,
-  and the image is `shorts-editor` in ECR). **Lambda's machines are not all alike**: timed
-  2026-11-20 on three fresh ones, the same 4:17 take was edited in 3:44, 3:43 and 5:34
-  (speech 140s, 138s and 221s; render 78s, 78s and 103s), nothing else different. So one
-  timing proves nothing in either direction: an afternoon was spent believing a change had
-  made speech slower, and an earlier finding that running two steps together is slower
-  there was one run on what was probably the slow kind. `result.json` records the
-  processor (`cpu`) so a slow edit can be told from a slow machine. About 3 to 4.5 cents a
-  take, and the same 14 segments as the Mac to within 0.3s.
+- **It runs on Lambda, on INTEL** (function `shorts-editor`, eu-west-1, x86_64, 10 GB which
+  is what buys its 6 processors, 15 minute limit; `lambda_handler.py` is the entry, set on
+  the function, and the image is `shorts-editor:latest` in ECR). It was on ARM for a day.
+  Timed 2026-11-20, the same 4:17 take from cold on three fresh machines each: ARM 3:45,
+  3:43 and 5:34 (speech 140s, 138s, 221s); Intel 3:37, 3:08 and 3:20 (speech 119s, 94s,
+  103s). Intel's worst beat ARM's best, its cut matches the Mac's to 0.02s where ARM's was
+  0.28s out, and it costs the same per take (25% more a second, for fewer seconds): about
+  3.7 cents. **ARM's machines are not all alike** (one in three was half as slow again at
+  everything), so one timing there proved nothing in either direction and an afternoon went
+  on believing otherwise. `result.json` records the processor (`cpu`) for that reason.
+  Memory runs at about 8.9 GB of the 10 on Intel (5.8 on ARM): the ceiling is Lambda's own,
+  so it is the number to watch if a long take ever fails.
 - **A cold start costs about 50 seconds, and the model comes from S3, not the image.**
   Lambda reads an image a block at a time as it is touched, and the 1.6 GB of weights read
   that way made speech take 115s cold against 29s warm (202s the first time a new image
@@ -116,10 +118,12 @@ in, a finished job folder out, no page.
   back under `takes/<id>/edit/`. **Not done**: nothing calls the function yet, nothing
   expires `takes/`, a note has no way in, and the name wants a title passed in (no key for
   the model or the posting app is on the function).
-- **Rebuild and ship**: `docker build -t shorts-editor .`, tag and push to the ECR
-  repository, then `aws lambda update-function-code --function-name shorts-editor
-  --image-uri <repo>:latest`. In zsh write `${ACCT}` in braces: `$ACCT:role` is read as a
-  modifier and eats the colon.
+- **Rebuild and ship with `bin/build-lambda.sh`, never a bare `docker build`.** This Mac
+  is ARM and its Docker (legacy builder, no buildx) IGNORES `--platform` and
+  `FROM --platform=`: twice it built an ARM image for the Intel function and reported
+  success. The script pins the Intel base image by digest, checks the result really is
+  x86_64 before pushing, and updates the function. About five minutes, emulated. ECR
+  expires untagged (replaced) images after a week.
 
 ## Posting (2026-09-19)
 
