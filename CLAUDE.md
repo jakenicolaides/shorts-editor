@@ -87,13 +87,15 @@ in, a finished job folder out, no page.
   set on the function, and the image is `shorts-editor` in ECR). A 4:17 take, warm: **4:18**
   (join 51s, speech 127s, render 80s), about 3.5 cents, and the same 14 segments as the Mac
   to within 0.02s. A 41 second take: 69s warm.
-- **A COLD start adds about 3 minutes 20**, nearly all of it the speech model being read
-  out of the image for the first time (speech took 202s cold against 29s warm on the same
-  take). Lambda fetches an image's blocks as they are touched, and 1.6 GB of weights touched
-  at random is the slow way to do it. Not fixed yet; fetching the model from S3 to /tmp at
-  start is the usual cure. Until then allow about 8 minutes for a first take of the evening.
-- **The function's role reaches `takes/` in `twixtle-shorts` and its own logs, nothing
-  else.** A take is `takes/<id>/game.*` and `cam.*`; the edit and the job's small files come
+- **A cold start costs about 50 seconds, and the model comes from S3, not the image.**
+  Lambda reads an image a block at a time as it is touched, and the 1.6 GB of weights read
+  that way made speech take 115s cold against 29s warm (202s the first time a new image
+  ran). `lambda_handler._fetch_model` copies the model from `models/` in the bucket to /tmp
+  once per container (19s) and points the runner at it; a 41 second take then runs in 1:59
+  cold against 1:09 warm. The image keeps its own copy as the fallback and for running the
+  image by hand. **A new model means both**: rebuild the image AND replace `models/`.
+- **The function's role reaches `takes/` in `twixtle-shorts`, reads `models/` there, and
+  writes its own logs, nothing else.** A take is `takes/<id>/game.*` and `cam.*`; the edit and the job's small files come
   back under `takes/<id>/edit/`. **Not done**: nothing calls the function yet, nothing
   expires `takes/`, a note has no way in, and the name wants a title passed in (no key for
   the model or the posting app is on the function).

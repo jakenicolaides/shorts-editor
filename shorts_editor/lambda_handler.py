@@ -16,6 +16,12 @@ is the only thing here that holds AWS access: the recorder's page is handed a
 link to upload to and a link to watch, never a key.
 
 Only /tmp is writable on Lambda, so the job folder lives there (SHORTS_WORK).
+
+The speech model is fetched from S3 into /tmp the first time a container runs
+(models/ in the same bucket, a copy of what the image holds). The image has it
+too, but Lambda reads an image a block at a time as it is touched, and 1.6 GB read
+that way cost about a minute and a half on every cold start. If the fetch fails,
+the image's copy is used: slower, never wrong.
 """
 import json
 import os
@@ -29,6 +35,39 @@ PREFIX = "takes/"
 KEEP = ("out.mp4", "transcript.json", "cut.json", "params.json", "relax.json", "solve.json",
         "meta.json", "status.json", "title.json", "probe.json", "loudness_in.json", "loudness_out.json",
         "history.json", "traceback.txt")
+
+
+MODEL_PREFIX = "models/faster-whisper-large-v3-turbo/"
+MODEL_DIR = Path("/tmp/model")
+
+
+def _fetch_model(s3) -> float:
+    """The speech model into /tmp, once per container. Returns the seconds it took
+    (0 when it was already there or could not be fetched)."""
+    if (MODEL_DIR / ".complete").exists():
+        os.environ["SHORTS_WHISPER_MODEL"] = str(MODEL_DIR)
+        return 0.0
+    from boto3.s3.transfer import TransferConfig
+    t0 = time.time()
+    try:
+        shutil.rmtree(MODEL_DIR, ignore_errors=True)
+        MODEL_DIR.mkdir(parents=True)
+        objs = s3.list_objects_v2(Bucket=BUCKET, Prefix=MODEL_PREFIX).get("Contents", [])
+        if not any(o["Key"].endswith("model.bin") for o in objs):
+            raise FileNotFoundError("no model under " + MODEL_PREFIX)
+        cfg = TransferConfig(max_concurrency=24, multipart_chunksize=32 * 1024 * 1024)
+        for o in objs:
+            name = o["Key"][len(MODEL_PREFIX):]
+            if name and "/" not in name:
+                s3.download_file(BUCKET, o["Key"], str(MODEL_DIR / name), Config=cfg)
+        (MODEL_DIR / ".complete").write_text("")
+        os.environ["SHORTS_WHISPER_MODEL"] = str(MODEL_DIR)
+        return round(time.time() - t0, 1)
+    except Exception as e:
+        print("model not fetched from S3, using the image's copy:", e)
+        shutil.rmtree(MODEL_DIR, ignore_errors=True)
+        os.environ.pop("SHORTS_WHISPER_MODEL", None)
+        return 0.0
 
 
 def handler(event, context=None):
@@ -58,6 +97,7 @@ def handler(event, context=None):
     if set(found) != {"game", "cam"}:
         raise FileNotFoundError(f"takes/{take}/ needs a game track and a cam track, found: {sorted(found) or 'neither'}")
     fetched = time.time() - t0
+    model_seconds = _fetch_model(s3)
 
     from . import worker
     res = worker.run(found["game"], found["cam"], game, event.get("date"), event.get("track") or "daily",
@@ -72,6 +112,7 @@ def handler(event, context=None):
                            ExtraArgs={"ContentType": "video/mp4" if name.endswith(".mp4") else
                                       "application/json" if name.endswith(".json") else "text/plain"})
     res["seconds_fetch"], res["seconds_store"] = round(fetched, 1), round(time.time() - t1, 1)
+    res["seconds_model"] = model_seconds
     res["edit"] = f"s3://{BUCKET}/{base}edit/out.mp4" if (job_dir / "out.mp4").exists() else None
     res.pop("dir", None)
     shutil.rmtree(tmp, ignore_errors=True)
