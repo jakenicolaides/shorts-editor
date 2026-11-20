@@ -90,8 +90,26 @@ def handler(event, context=None):
     return res
 
 
+def _cpu() -> str:
+    """Which processor this run landed on. Lambda's machines are not all alike: timed
+    2026-11-20, the same take took 224s on two fresh ones and 334s on a third, with
+    nothing else different. Recorded with every result so a slow edit can be told from
+    a slow machine."""
+    try:
+        text = Path("/proc/cpuinfo").read_text()
+    except OSError:
+        return "unknown"
+    m = re.search(r"model name\s*:\s*(.+)", text)
+    if m:
+        return m.group(1).strip()
+    part = re.search(r"CPU part\s*:\s*(0x[0-9a-f]+)", text)
+    names = {"0xd0c": "Graviton2 (Neoverse N1)", "0xd40": "Graviton3 (Neoverse V1)", "0xd4f": "Graviton4 (Neoverse V2)"}
+    return names.get(part.group(1), "arm " + part.group(1)) if part else "unknown"
+
+
 def _result(s3, take: str, res: dict):
-    body = {k: res.get(k) for k in ("stage", "error", "final_duration", "flags", "title", "seconds")}
+    res.setdefault("cpu", _cpu())
+    body = {k: res.get(k) for k in ("stage", "error", "final_duration", "flags", "title", "seconds", "cpu")}
     s3.put_object(Bucket=BUCKET, Key=f"{PREFIX}{take}/edit/result.json", Body=json.dumps(body).encode(),
                   ContentType="application/json")
 

@@ -38,29 +38,26 @@ token. Both are live (2026-09-23) and the ssh fallback that bridged the gap is g
 **A take can arrive as two tracks instead of one clip.** The ambassador recorder (a page a
 presenter records in; the plan is `AMBASSADORS.md` in the Twixtle repo) records the game and
 the webcam SEPARATELY, the game as the browser tab cropped to it at whatever size it had on
-that person's screen. `compose.py` stacks them into the frame OBS always produced (1080x1920,
-webcam in the top 762, one mixed sound track) and **everything after that is unchanged**: it
-is the job's `input.mp4`, and the cut, the title read, the solve tone and the render see an
-ordinary clip. Checked against a real recording split in two: the same seven segments to
-within 0.04s, the same solve time, 25s of joining on a five minute take.
+that person's screen. **There is no joined clip** (since 2026-11-20; before that the two were
+stacked and encoded into `input.mp4`, which the render decoded and encoded again). The sound
+is mixed once into `mix.wav` (`compose.mix`), and that one file is what is transcribed,
+measured for loudness and rendered, so the three agree by construction. The picture is
+stacked by the render itself, in the pass that cuts it (`compose.Tracks`,
+`compose.stack_filters`: the frame OBS always produced, 1080x1920, webcam in the top 762).
+`Job.source` is what the render, the loudness pass and the title read are handed: the one
+clip for an OBS recording, the `Tracks` for a take. On Lambda that took the picture work on
+a 4:17 take from 131s (join 51, render 80) to 78s.
 
 - **Stacking is ours, not the browser's**, so the layout can change without anyone
   re-recording and a weak laptop is not asked to composite while someone plays.
-- **The sound is mixed FIRST, on its own, as a wav; the picture is joined beside it in a
-  second run** (`compose.mix`, 2026-11-20). In one run together, the sound came out with
-  1.4 s missing a quarter of a second in on Jake's first live take, and because the cut is
-  made from a wav (samples in a row, no timestamps) while the render trims by timestamp,
-  the voice ran 1.5 s early until the first cut put the two back in step. Two earlier
-  takes had no such hole, so it is the take's own timing that sets it off: do not fold
-  the two runs back into one because a test take looks fine. Each track is laid on the
-  clock from zero before the mix (`aresample async=1:first_pts=0`), and `compose` refuses
-  a joined clip whose sound packets are off a steady clock (`_sound_faults`).
-- **On a Mac the transcription runs while the picture is joined; on a server it waits**
-  (`_compose_begin`). The mix exists seconds in and is what gets transcribed, so nothing
-  about the sound waits for the picture. Where Whisper is on the graphics chip that took
-  Jake's 1:44 take from 49s to 39s. On Lambda both steps want all six processors and a
-  4:17 take got slower together (4:53 against 4:18), so there the join finishes first.
-  Do not "fix" the server by turning it back on: it was measured.
+- **The sound is mixed FIRST, on its own, as a wav, never in the same ffmpeg run as the
+  picture** (`compose.mix`, 2026-11-20). Mixed in one run with the picture, the sound came
+  out with 1.4 s missing a quarter of a second in on Jake's first live take, and because
+  the cut is made from a wav (samples in a row, no timestamps) while the render trims by
+  timestamp, the voice ran 1.5 s early until the first cut put the two back in step. Two
+  earlier takes had no such hole, so it is the take's own timing that sets it off: do not
+  fold the mix back into the render because a test take looks fine. Each track is laid on
+  the clock from zero before the mix (`aresample async=1:first_pts=0`).
 - **The mix is a plain sum** (`amix normalize=0`): the default halves each input, which
   drops the voice 6 dB before the loudness pass ever sees it.
 - **The recorder knows which puzzle it opened**, so the game is passed in, never guessed from
@@ -97,11 +94,16 @@ in, a finished job folder out, no page.
   5; left alone, the two would disagree for a reason that has nothing to do with the machine.
 - **The sound goes in as samples, not a path.** Given a path faster-whisper decodes it with
   PyAV, and the PyAV that pip resolves today breaks that call.
-- **It runs on Lambda, timed 2026-11-20** (function `shorts-editor`, eu-west-1, ARM, 10 GB
-  which is what buys its 6 processors, 15 minute limit; `lambda_handler.py` is the entry,
-  set on the function, and the image is `shorts-editor` in ECR). A 4:17 take, warm: **4:18**
-  (join 51s, speech 127s, render 80s), about 3.5 cents, and the same 14 segments as the Mac
-  to within 0.02s. A 41 second take: 69s warm.
+- **It runs on Lambda** (function `shorts-editor`, eu-west-1, ARM, 10 GB which is what buys
+  its 6 processors, 15 minute limit; `lambda_handler.py` is the entry, set on the function,
+  and the image is `shorts-editor` in ECR). **Lambda's machines are not all alike**: timed
+  2026-11-20 on three fresh ones, the same 4:17 take was edited in 3:44, 3:43 and 5:34
+  (speech 140s, 138s and 221s; render 78s, 78s and 103s), nothing else different. So one
+  timing proves nothing in either direction: an afternoon was spent believing a change had
+  made speech slower, and an earlier finding that running two steps together is slower
+  there was one run on what was probably the slow kind. `result.json` records the
+  processor (`cpu`) so a slow edit can be told from a slow machine. About 3 to 4.5 cents a
+  take, and the same 14 segments as the Mac to within 0.3s.
 - **A cold start costs about 50 seconds, and the model comes from S3, not the image.**
   Lambda reads an image a block at a time as it is touched, and the 1.6 GB of weights read
   that way made speech take 115s cold against 29s warm (202s the first time a new image
