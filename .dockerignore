@@ -1,0 +1,9 @@
+.venv
+work
+work-test
+fixtures
+.env
+.git
+__pycache__
+*.pyc
+.DS_Store

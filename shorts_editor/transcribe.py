@@ -1,4 +1,10 @@
-"""Whisper transcription with word timestamps (mlx-whisper on Apple Silicon).
+"""Whisper transcription with word timestamps.
+
+One model, two programs that run it: mlx-whisper on Apple Silicon (every Mac the
+editor runs on), faster-whisper everywhere else (the Linux server that edits
+ambassadors' takes, and Windows). Same weights, same settings, same output shape,
+so nothing after this step knows which one ran. SHORTS_WHISPER=mlx|faster forces
+one, which is how the two are compared on one machine.
 
 Output shape (transcript.json):
   {"words": [{"w": "hello", "s": 1.23, "e": 1.61, "filler": false}, ...],
@@ -8,12 +14,21 @@ import os
 import re
 import sys
 import json
+import platform
 import tempfile
 from pathlib import Path
 
 from .cancel import Token
 
 MODEL = "mlx-community/whisper-large-v3-turbo"
+FASTER_MODEL = "large-v3-turbo"   # the same weights, converted for faster-whisper (CTranslate2)
+
+
+def backend() -> str:
+    want = os.environ.get("SHORTS_WHISPER", "").strip().lower()
+    if want in ("mlx", "faster"):
+        return want
+    return "mlx" if (sys.platform == "darwin" and platform.machine() == "arm64") else "faster"
 
 # What counts as a filler: the word on its own, case-insensitive, punctuation stripped.
 FILLER_RE = re.compile(r"^(u+m+|u+h+|e+r+m*|e+h+|a+h+|h+m+|m+m+|o+h+)$")
@@ -61,7 +76,7 @@ def _energy_gate(words, audio_wav: Path, margin_db: float = 20.0):
     return kept
 
 
-def transcribe(audio_wav: Path, model: str = MODEL) -> dict:
+def _run_mlx(audio_wav: Path, model: str):
     import mlx_whisper
 
     result = mlx_whisper.transcribe(
@@ -71,23 +86,64 @@ def transcribe(audio_wav: Path, model: str = MODEL) -> dict:
         language="en",
         condition_on_previous_text=False,
     )
+    raw = [(w["word"], w["start"], w["end"], w.get("probability", 1.0))
+           for seg in result.get("segments", []) for w in seg.get("words", [])]
+    return raw, result.get("text", "")
+
+
+def _run_faster(audio_wav: Path, model: str):
+    from faster_whisper import WhisperModel
+
+    m = WhisperModel(model, device="cpu",
+                     # float32 is the weights as they are; int8 is quicker and close (SHORTS_WHISPER_COMPUTE)
+                     compute_type=os.environ.get("SHORTS_WHISPER_COMPUTE", "float32"),
+                     cpu_threads=int(os.environ.get("SHORTS_WHISPER_THREADS", "0") or 0) or (os.cpu_count() or 4))
+    # the wav is already what Whisper wants (mono, 16k: extract_audio), so it is handed over as
+    # samples. Given a path, faster-whisper decodes it with PyAV, whose versions break each other
+    import numpy as np
+    from scipy.io import wavfile
+    rate, x = wavfile.read(str(audio_wav))
+    if rate != 16000 or x.ndim != 1:
+        raise RuntimeError(f"expected a mono 16 kHz wav, got {rate} Hz, {x.ndim} dimension(s)")
+    segments, _ = m.transcribe(
+        x.astype(np.float32) / 32768.0,
+        word_timestamps=True,
+        language="en",
+        condition_on_previous_text=False,
+        beam_size=1,   # mlx-whisper decodes greedily; faster-whisper's own default is a beam of 5
+    )
+    raw, text = [], []
+    for seg in segments:
+        text.append(seg.text)
+        raw += [(w.word, w.start, w.end, w.probability) for w in (seg.words or [])]
+    return raw, "".join(text)
+
+
+def transcribe(audio_wav: Path, model: str = None) -> dict:
+    which = backend()
+    if which == "mlx":
+        model = model or MODEL
+        raw, full = _run_mlx(audio_wav, model)
+    else:
+        model = model or os.environ.get("SHORTS_WHISPER_MODEL") or FASTER_MODEL
+        raw, full = _run_faster(audio_wav, model)
+        model = "faster-whisper:" + model
     words = []
-    for seg in result.get("segments", []):
-        for w in seg.get("words", []):
-            text = w["word"].strip()
-            if not re.search(r"[A-Za-z0-9]", text):
-                continue  # Whisper emits lone punctuation over silence
-            words.append({
-                "w": text,
-                "s": round(float(w["start"]), 3),
-                "e": round(float(w["end"]), 3),
-                "filler": is_filler(text),
-                "p": round(float(w.get("probability", 1.0)), 2),
-            })
+    for word, start, end, prob in raw:
+        text = word.strip()
+        if not re.search(r"[A-Za-z0-9]", text):
+            continue  # Whisper emits lone punctuation over silence
+        words.append({
+            "w": text,
+            "s": round(float(start), 3),
+            "e": round(float(end), 3),
+            "filler": is_filler(text),
+            "p": round(float(prob), 2),
+        })
     words.sort(key=lambda x: x["s"])
     n = len(words)
     words = _energy_gate(words, audio_wav)
-    return {"words": words, "text": result.get("text", "").strip(), "model": model,
+    return {"words": words, "text": full.strip(), "model": model,
             "dropped_silent": n - len(words)}
 
 

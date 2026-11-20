@@ -59,6 +59,35 @@ within 0.04s, the same solve time, 25s of joining on a five minute take.
   anything listens. Transcribing the microphone alone and finding the chime in the game's
   sound alone would both be cleaner than what OBS ever gave.
 
+## The editor on Linux (2026-11-20)
+
+**The editor runs on Linux, for the server that will edit ambassadors' takes.** The only
+Mac-only part was the program that runs Whisper. `transcribe.py` now has two: mlx-whisper on
+Apple Silicon, faster-whisper everywhere else, picked by the machine (`backend()`;
+`SHORTS_WHISPER=mlx|faster` forces one). **Same model, same weights, same settings, same
+output shape**, so nothing after transcription knows which ran, and a Mac's own output is
+byte for byte what it was. `Dockerfile` builds it (model baked in, 4.7 GB image),
+`requirements-linux.txt` is its package list, and `worker.py` is the entry point: two tracks
+in, a finished job folder out, no page.
+
+- **Measured, not assumed.** Five past takes cut from each runner's transcript: identical
+  segments on all five, boundaries within 0.1s on four, and on the fifth the Linux runner
+  missed the clip's last word ("cool", alone, two seconds after the talking stopped), ending
+  the edit 2.5s early. A 4:17 take edited whole inside Linux: the same 14 segments as the Mac
+  to within 0.02s, the same solve time.
+- **`float32`, never `int8`.** int8 is the usual advice for CPU and is quicker, and on the
+  same take it heard different words and punctuated differently. `SHORTS_WHISPER_COMPUTE`
+  exists to measure that again, not to turn it on.
+- **`beam_size=1`.** mlx-whisper decodes greedily and faster-whisper defaults to a beam of
+  5; left alone, the two would disagree for a reason that has nothing to do with the machine.
+- **The sound goes in as samples, not a path.** Given a path faster-whisper decodes it with
+  PyAV, and the PyAV that pip resolves today breaks that call.
+- **Time, on six cores of this Mac inside a Linux VM**: 3:36 for the 4:17 take (join 35s,
+  speech 128s, render 52s). A server's
+  cores are slower, so the first real run is what says whether a long take fits a 15 minute
+  limit. **Not done**: nothing here talks to S3 or a queue, and the name still wants the
+  posting app and the model unless a title is passed in.
+
 ## Posting (2026-09-19)
 
 **Posting stays manual and in-app, on purpose.** Posting through an API (Upload-Post) was

@@ -1,0 +1,9 @@
+# The server that edits ambassadors' takes (and anything that is not an Apple Silicon Mac).
+# requirements.txt is the Mac's: the only difference is which program runs Whisper.
+faster-whisper==1.2.1
+ctranslate2==4.9.0
+numpy
+scipy
+anthropic
+pydantic
+boto3
