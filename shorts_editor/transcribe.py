@@ -1,15 +1,10 @@
 """Whisper transcription with word timestamps.
 
-One model, three ways to run it: mlx-whisper on Apple Silicon (every Mac the
-editor runs on), faster-whisper everywhere else (Linux, Windows), and Groq's hosted
-copy of it, which the server that edits ambassadors' takes asks for because its own
-processors take two minutes over what Groq does in seconds. Same model
-(large-v3-turbo), same output shape, so nothing after this step knows which ran.
-SHORTS_WHISPER=mlx|faster|groq forces one, which is how they are compared.
-
-Groq is only ever ASKED FOR, never the default, and never the only way: with no
-key, or on any failure, the local runner does the job (slower, never wrong), and
-the transcript says which one ran and why.
+One model, two programs that run it: mlx-whisper on Apple Silicon (every Mac the
+editor runs on), faster-whisper everywhere else (the Linux server that edits
+ambassadors' takes, and Windows). Same weights, same settings, same output shape,
+so nothing after this step knows which one ran. SHORTS_WHISPER=mlx|faster forces
+one, which is how the two are compared on one machine.
 
 Output shape (transcript.json):
   {"words": [{"w": "hello", "s": 1.23, "e": 1.61, "filler": false}, ...],
@@ -29,19 +24,11 @@ MODEL = "mlx-community/whisper-large-v3-turbo"
 FASTER_MODEL = "large-v3-turbo"   # the same weights, converted for faster-whisper (CTranslate2)
 
 
-GROQ_MODEL = "whisper-large-v3-turbo"
-GROQ_URL = "https://api.groq.com/openai/v1/audio/transcriptions"
-
-
-def local_backend() -> str:
-    return "mlx" if (sys.platform == "darwin" and platform.machine() == "arm64") else "faster"
-
-
 def backend() -> str:
     want = os.environ.get("SHORTS_WHISPER", "").strip().lower()
-    if want in ("mlx", "faster", "groq"):
+    if want in ("mlx", "faster"):
         return want
-    return local_backend()
+    return "mlx" if (sys.platform == "darwin" and platform.machine() == "arm64") else "faster"
 
 # What counts as a filler: the word on its own, case-insensitive, punctuation stripped.
 FILLER_RE = re.compile(r"^(u+m+|u+h+|e+r+m*|e+h+|a+h+|h+m+|m+m+|o+h+)$")
@@ -132,55 +119,9 @@ def _run_faster(audio_wav: Path, model: str):
     return raw, "".join(text)
 
 
-def _run_groq(audio_wav: Path, model: str):
-    """The same model, run by Groq. The sound leaves this machine: that is the cost,
-    and it is why this is asked for by a setting and is not what a Mac does."""
-    import subprocess
-    import urllib.error
-    import urllib.request
-    import uuid
-    key = os.environ.get("GROQ_API_KEY", "").strip()
-    if not key:
-        raise RuntimeError("no GROQ_API_KEY")
-    # FLAC: the same samples in about a third of the bytes, so less to send
-    with tempfile.TemporaryDirectory() as td:
-        flac = Path(td) / "audio.flac"
-        subprocess.run(["ffmpeg", "-y", "-v", "error", "-i", str(audio_wav), "-c:a", "flac", str(flac)], check=True)
-        body_file = flac.read_bytes()
-    fields = [("model", model), ("response_format", "verbose_json"), ("timestamp_granularities[]", "word"),
-              ("language", "en"), ("temperature", "0")]
-    bound = uuid.uuid4().hex
-    parts = b"".join(f'--{bound}\r\nContent-Disposition: form-data; name="{k}"\r\n\r\n{v}\r\n'.encode() for k, v in fields)
-    parts += (f'--{bound}\r\nContent-Disposition: form-data; name="file"; filename="audio.flac"\r\n'
-              f'Content-Type: audio/flac\r\n\r\n').encode() + body_file + f"\r\n--{bound}--\r\n".encode()
-    req = urllib.request.Request(GROQ_URL, data=parts, method="POST", headers={
-        "Authorization": "Bearer " + key, "Content-Type": "multipart/form-data; boundary=" + bound,
-        "User-Agent": "shorts-editor"})
-    try:
-        with urllib.request.urlopen(req, timeout=180) as r:
-            j = json.loads(r.read())
-    except urllib.error.HTTPError as e:
-        raise RuntimeError(f"Groq answered HTTP {e.code}: {e.read()[:200].decode(errors='replace')}")
-    words = j.get("words")
-    if not isinstance(words, list) or (not words and (j.get("text") or "").strip()):
-        raise RuntimeError("Groq sent no word timings")
-    # no per-word confidence comes back; 1.0 is "not known", and nothing downstream cuts on it
-    return [(w["word"], w["start"], w["end"], 1.0) for w in words], j.get("text", "")
-
-
 def transcribe(audio_wav: Path, model: str = None) -> dict:
     which = backend()
-    fell_back = None
-    if which == "groq":
-        try:
-            raw, full = _run_groq(audio_wav, model or GROQ_MODEL)
-            model = "groq:" + (model or GROQ_MODEL)
-        except Exception as e:   # no key, no network, a refusal: the local runner is slower and always there
-            fell_back = str(e)[:200]
-            which, model = local_backend(), None
-    if which == "groq":
-        pass
-    elif which == "mlx":
+    if which == "mlx":
         model = model or MODEL
         raw, full = _run_mlx(audio_wav, model)
     else:
@@ -202,11 +143,8 @@ def transcribe(audio_wav: Path, model: str = None) -> dict:
     words.sort(key=lambda x: x["s"])
     n = len(words)
     words = _energy_gate(words, audio_wav)
-    out = {"words": words, "text": full.strip(), "model": model,
-           "dropped_silent": n - len(words)}
-    if fell_back:
-        out["fell_back"] = fell_back   # Groq was asked for and did not answer: why, for whoever wonders at the time it took
-    return out
+    return {"words": words, "text": full.strip(), "model": model,
+            "dropped_silent": n - len(words)}
 
 
 _one_at_a_time = __import__("threading").Lock()   # Whisper: one model load, one GPU; overlapping runs gain nothing
