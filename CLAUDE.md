@@ -55,6 +55,12 @@ within 0.04s, the same solve time, 25s of joining on a five minute take.
   the two runs back into one because a test take looks fine. Each track is laid on the
   clock from zero before the mix (`aresample async=1:first_pts=0`), and `compose` refuses
   a joined clip whose sound packets are off a steady clock (`_sound_faults`).
+- **On a Mac the transcription runs while the picture is joined; on a server it waits**
+  (`_compose_begin`). The mix exists seconds in and is what gets transcribed, so nothing
+  about the sound waits for the picture. Where Whisper is on the graphics chip that took
+  Jake's 1:44 take from 49s to 39s. On Lambda both steps want all six processors and a
+  4:17 take got slower together (4:53 against 4:18), so there the join finishes first.
+  Do not "fix" the server by turning it back on: it was measured.
 - **The mix is a plain sum** (`amix normalize=0`): the default halves each input, which
   drops the voice 6 dB before the loudness pass ever sees it.
 - **The recorder knows which puzzle it opened**, so the game is passed in, never guessed from

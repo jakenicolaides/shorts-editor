@@ -193,6 +193,7 @@ class Job:
                 box["out"] = compose.compose(game, cam, self.dir / "input.mp4", off, token=self.token, sound=sound)
             except BaseException as e:   # handed to whoever waits: a thread's own traceback helps nobody
                 box["err"] = e
+            box["took"] = time.time() - t0   # the join's own time, not how long it was waited for
 
         th = threading.Thread(target=work, daemon=True)
         th.start()
@@ -204,7 +205,7 @@ class Job:
             sound.unlink(missing_ok=True)
             if "err" in box:
                 raise box["err"]
-            self.set(msg=f"joined in {time.time() - t0:.0f}s")
+            self.set(msg=f"joined in {box['took']:.0f}s")
             return box["out"]
         return wait
 
