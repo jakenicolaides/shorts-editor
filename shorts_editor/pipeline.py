@@ -166,9 +166,15 @@ class Job:
         on, and return a function that waits for it and hands the clip back.
 
         The sound is mixed first (seconds) and becomes audio.wav straight away, so the
-        slow step that only needs sound, the transcription, runs WHILE the picture is
-        being joined instead of after it. On the server that is about a quarter of the
-        whole edit. Both are children of this job's token, so a cancel stops both."""
+        slow step that only needs sound, the transcription, can run WHILE the picture is
+        being joined instead of after it. Both are children of this job's token, so a
+        cancel stops both.
+
+        ONLY where Whisper runs on the graphics chip (a Mac): there the two want
+        different things and a 1:44 take went from 49s to 39s. On a server both want
+        every processor, and timed on Lambda a 4:17 take got SLOWER together (4:53
+        against 4:18 one after the other; speech took 211s beside the join, 127s alone).
+        So everywhere else the join is waited for before anything else starts."""
         from . import compose
         game, cam = self._track("game"), self._track("cam")
         if not (game and cam):
@@ -190,6 +196,8 @@ class Job:
 
         th = threading.Thread(target=work, daemon=True)
         th.start()
+        if transcribe.backend() != "mlx":
+            th.join()
 
         def wait() -> Path:
             th.join()
