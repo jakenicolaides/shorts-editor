@@ -46,6 +46,15 @@ within 0.04s, the same solve time, 25s of joining on a five minute take.
 
 - **Stacking is ours, not the browser's**, so the layout can change without anyone
   re-recording and a weak laptop is not asked to composite while someone plays.
+- **The sound is mixed FIRST, on its own, as a wav; the picture is joined beside it in a
+  second run** (`compose.mix`, 2026-11-20). In one run together, the sound came out with
+  1.4 s missing a quarter of a second in on Jake's first live take, and because the cut is
+  made from a wav (samples in a row, no timestamps) while the render trims by timestamp,
+  the voice ran 1.5 s early until the first cut put the two back in step. Two earlier
+  takes had no such hole, so it is the take's own timing that sets it off: do not fold
+  the two runs back into one because a test take looks fine. Each track is laid on the
+  clock from zero before the mix (`aresample async=1:first_pts=0`), and `compose` refuses
+  a joined clip whose sound packets are off a steady clock (`_sound_faults`).
 - **The mix is a plain sum** (`amix normalize=0`): the default halves each input, which
   drops the voice 6 dB before the loudness pass ever sees it.
 - **The recorder knows which puzzle it opened**, so the game is passed in, never guessed from
