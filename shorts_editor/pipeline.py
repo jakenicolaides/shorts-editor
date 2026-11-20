@@ -14,6 +14,7 @@
 import json
 import os
 import shutil
+import threading
 import time
 import traceback
 from datetime import datetime
@@ -160,17 +161,44 @@ class Job:
             return p
         return None
 
-    def _compose(self) -> Path:
-        """Join a recorder's two tracks into the one clip everything else works on."""
+    def _compose_begin(self):
+        """Start joining a recorder's two tracks into the one clip everything else works
+        on, and return a function that waits for it and hands the clip back.
+
+        The sound is mixed first (seconds) and becomes audio.wav straight away, so the
+        slow step that only needs sound, the transcription, runs WHILE the picture is
+        being joined instead of after it. On the server that is about a quarter of the
+        whole edit. Both are children of this job's token, so a cancel stops both."""
         from . import compose
         game, cam = self._track("game"), self._track("cam")
         if not (game and cam):
             raise RuntimeError("this job has no clip and not both tracks: record it again")
         self.set(stage="compose", progress=2, msg="joining the webcam and the game")
         t0 = time.time()
-        out = compose.compose(game, cam, self.dir / "input.mp4", self.meta.get("offset_ms") or 0, token=self.token)
-        self.set(msg=f"joined in {time.time() - t0:.0f}s")
-        return out
+        off = self.meta.get("offset_ms") or 0
+        sound = compose.mix(game, cam, self.dir / "mix.wav", off, token=self.token)
+        wav = self.dir / "audio.wav"
+        if not wav.exists():
+            transcribe.extract_audio(sound, wav, token=self.token)
+        box = {}
+
+        def work():
+            try:
+                box["out"] = compose.compose(game, cam, self.dir / "input.mp4", off, token=self.token, sound=sound)
+            except BaseException as e:   # handed to whoever waits: a thread's own traceback helps nobody
+                box["err"] = e
+
+        th = threading.Thread(target=work, daemon=True)
+        th.start()
+
+        def wait() -> Path:
+            th.join()
+            sound.unlink(missing_ok=True)
+            if "err" in box:
+                raise box["err"]
+            self.set(msg=f"joined in {time.time() - t0:.0f}s")
+            return box["out"]
+        return wait
 
     def run(self):
         try:
@@ -197,14 +225,17 @@ class Job:
 
     def _run(self):
         tok = self.token
-        src = self.input or self._compose()   # a recorder's take arrives as two tracks
-        info = render.probe(src)
-        _write(self.dir / "probe.json", info)
-        self.set(stage="audio", progress=5, msg=f"probed: {info['duration']:.1f}s {info.get('width')}x{info.get('height')}")
-
         wav = self.dir / "audio.wav"
-        if not wav.exists():
-            transcribe.extract_audio(src, wav, token=tok)
+        src = self.input
+        joined = None
+        if src is None:   # a recorder's take arrives as two tracks: its sound is ready long before its picture
+            joined = self._compose_begin()
+        else:
+            info = render.probe(src)
+            _write(self.dir / "probe.json", info)
+            self.set(stage="audio", progress=5, msg=f"probed: {info['duration']:.1f}s {info.get('width')}x{info.get('height')}")
+            if not wav.exists():
+                transcribe.extract_audio(src, wav, token=tok)
         self.set(stage="transcribe", progress=10, msg="transcribing")
 
         tpath = self.dir / "transcript.json"
@@ -212,6 +243,11 @@ class Job:
             t0 = time.time()
             t = transcribe.transcribe_killable(wav, tpath, tok, on_wait=lambda: self.set(msg="waiting for another clip's transcription to finish"))
             self.set(msg=f"transcribed {len(t['words'])} words in {time.time() - t0:.0f}s")
+        if joined is not None:
+            src = joined()
+            info = render.probe(src)
+            _write(self.dir / "probe.json", info)
+            self.set(msg=f"probed: {info['duration']:.1f}s {info.get('width')}x{info.get('height')}")
         self.set(stage="solve", progress=40)
 
         game = self.meta.get("game") or "auto"

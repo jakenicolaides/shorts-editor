@@ -90,16 +90,20 @@ def mix(game: Path, cam: Path, out_wav: Path, offset_ms: float = 0.0, token: Tok
     return out_wav
 
 
-def compose(game: Path, cam: Path, out: Path, offset_ms: float = 0.0, token: Token = None) -> Path:
+def compose(game: Path, cam: Path, out: Path, offset_ms: float = 0.0, token: Token = None, sound: Path = None) -> Path:
     """Stack `cam` over `game` into `out`. offset_ms is how much LATER the webcam
     recording started than the game recording (negative: earlier), as the recorder
     measured it; the later one is delayed by that much so the two stay in step.
     Two runs: the sound first (mix), then the picture with that sound laid beside it.
+    `sound` is a mix already made (the pipeline makes it early, to transcribe while the
+    picture is still being joined); it is the caller's file and is left alone.
     Written beside `out` and moved into place, so a cancelled run never leaves a
     short file that looks finished."""
     tok = token or Token()
     off = max(-5.0, min(5.0, float(offset_ms or 0) / 1000.0))   # a few ms in practice; a wild value is a bug, not a delay
-    sound = mix(game, cam, out.with_name(out.stem + ".mix.wav"), offset_ms, tok)
+    own = sound is None
+    if own:
+        sound = mix(game, cam, out.with_name(out.stem + ".mix.wav"), offset_ms, tok)
     cmd = ["ffmpeg", "-y", "-v", "error",
            "-itsoffset", f"{max(-off, 0):.3f}", "-i", str(game),
            "-itsoffset", f"{max(off, 0):.3f}", "-i", str(cam),
@@ -127,7 +131,8 @@ def compose(game: Path, cam: Path, out: Path, offset_ms: float = 0.0, token: Tok
         raise RuntimeError("could not join the two tracks: " + (e.stderr or "").strip()[-400:])
     finally:
         tmp.unlink(missing_ok=True)
-        sound.unlink(missing_ok=True)
+        if own:
+            sound.unlink(missing_ok=True)
     return out
 
 
