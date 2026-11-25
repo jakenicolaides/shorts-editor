@@ -253,8 +253,30 @@ class Job:
             from .title import PRACTICE
             self.set(msg=f"{found} has no solve: it ends on the last word" if found in PRACTICE
                      else f"solve tone again as {found}: at {when} (score {score})")
+        self.trim_opening(found or game)
         self.recut(fit=True)
         self.rerender()
+
+    def trim_opening(self, game):
+        """Start the video where the presenter starts on the puzzle (opening.py). Asked
+        once per job, before the first cut, and only where nothing has pinned the start."""
+        path = self.dir / "opening.json"
+        if path.exists():
+            return
+        params = _read(self.dir / "params.json") or {}
+        if params.get("start_override") is not None:
+            return
+        from . import opening
+        self.set(stage="opening", progress=44, msg="finding where the puzzle starts")
+        words = (_read(self.dir / "transcript.json") or {}).get("words") or []
+        res = opening.find(words, game, (self.meta.get("title") or "").strip() or None)
+        self.token.check()
+        _write(path, res)
+        if res.get("at") is not None:
+            _write(self.dir / "params.json", {**params, "start_override": res["at"]})
+            self.set(msg=f"opening trimmed by {res['trimmed']}s: {res['why']}")
+        else:
+            self.set(msg=f"opening kept: {res['why']}")
 
     def set_speed(self, speed: float):
         """Speed is chosen after the first cut, on the job's panel. The 1:30-3:00 fit is

@@ -118,15 +118,22 @@ def render(src: Path, keep, speed, out: Path, loud: dict, crf: int = 18, on_prog
            "-c:a", "aac", "-b:a", f"{AUDIO_KBPS}k", "-ar", "48000",
            str(out)]
     token = token or Token()
-    p = token.popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-    for line in p.stdout:
-        if on_progress and line.startswith("out_time_us="):
-            try:
-                on_progress(int(line.split("=")[1]) / 1e6)
-            except ValueError:
-                pass
-    err = p.stderr.read()
-    code = p.wait()
+    # What ffmpeg says goes to a FILE, never a pipe. Progress is read from stdout to its end before
+    # anything else is, so a pipe for stderr fills (64 KB) the moment ffmpeg has a lot to warn about,
+    # ffmpeg stops to wait for a reader, and the render hangs for good: a take did exactly that on
+    # Lambda and ran into the 15 minute limit with nothing written (2026-11-25).
+    import tempfile
+    with tempfile.TemporaryFile("w+", errors="replace") as errf:
+        p = token.popen(cmd, stdout=subprocess.PIPE, stderr=errf, text=True)
+        for line in p.stdout:
+            if on_progress and line.startswith("out_time_us="):
+                try:
+                    on_progress(int(line.split("=")[1]) / 1e6)
+                except ValueError:
+                    pass
+        code = p.wait()
+        errf.seek(0)
+        err = errf.read()
     token.check()
     if code != 0:
         raise RuntimeError("render failed:\n" + err[-3000:])

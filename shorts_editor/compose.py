@@ -122,9 +122,15 @@ class Tracks:
     def cam_delay(self) -> float: return max(self.off, 0.0)
 
     def inputs(self) -> list:
-        """ffmpeg input arguments: 0 = game, 1 = webcam, 2 = the mixed sound."""
-        return ["-itsoffset", f"{self.game_delay:.3f}", "-i", str(self.game),
-                "-itsoffset", f"{self.cam_delay:.3f}", "-i", str(self.cam),
+        """ffmpeg input arguments: 0 = game, 1 = webcam, 2 = the mixed sound.
+
+        -reinit_filter 0 on both pictures: a tab capture changes size for a few frames when Chrome
+        shows or hides a bar above the page (a presenter's take did, 2026-11-25, by 8 to 18 pixels
+        for a fifth of a second). Left alone ffmpeg rebuilds the whole graph at each change, which
+        restarts `trim` and loses everything before it (27s of that take), and warns about every
+        sound packet after. The scale filter takes a frame of another size as it comes."""
+        return ["-reinit_filter", "0", "-itsoffset", f"{self.game_delay:.3f}", "-i", str(self.game),
+                "-reinit_filter", "0", "-itsoffset", f"{self.cam_delay:.3f}", "-i", str(self.cam),
                 "-i", str(self.sound)]
 
     def duration(self) -> float:

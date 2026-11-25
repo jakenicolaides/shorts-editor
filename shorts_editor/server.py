@@ -334,7 +334,7 @@ class H(BaseHTTPRequestHandler):
         return self._json({"id": job.id})
 
 
-BUSY_STAGES = {"queued", "compose", "audio", "transcribe", "solve", "title", "cut", "loudness", "render", "editing", "saving", "scheduling"}
+BUSY_STAGES = {"queued", "compose", "audio", "transcribe", "solve", "title", "opening", "cut", "loudness", "render", "editing", "saving", "scheduling"}
 
 
 def _sweep_orphans():
