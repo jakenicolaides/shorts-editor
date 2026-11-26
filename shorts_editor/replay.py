@@ -47,7 +47,8 @@ FPS = 30
 # bucket's role, fetch anything it names. Every request is checked against these origins (plus
 # data: and blob:, which go nowhere) and anything else is refused before it leaves. A local
 # test of a log recorded on a dev server adds its address with REPLAY_ALLOWED_ORIGINS.
-ALLOWED_ORIGINS = ("https://twixtle.games", "https://vowelsweeper.games")
+ALLOWED_ORIGINS = ("https://twixtle.games", "https://vowelsweeper.games",
+                   "https://fonts.googleapis.com", "https://fonts.gstatic.com")   # Twixtle's own type comes from Google Fonts
 
 
 def _allowed(url: str) -> bool:
@@ -56,6 +57,11 @@ def _allowed(url: str) -> bool:
     extra = tuple(o.strip().rstrip("/") for o in os.environ.get("REPLAY_ALLOWED_ORIGINS", "").split(",") if o.strip())
     return any(url == o or url.startswith(o + "/") for o in ALLOWED_ORIGINS + extra)
 
+
+# Each game's layout width in the presenters' recorder (record.js, LAYOUT_WIDTH), and the video's
+# game panel (compose.py: 1080 by 1920 less the camera's 762).
+LAYOUT_WIDTH = {"twixtle": 750, "vowelsweeper": 530}
+GAME_PANEL = (1080, 1158)
 
 SETTLE_S = 2.0       # for the player's fonts and images to arrive before anything is filmed
 # How much faster than real time the log is played. Measured 2026-11-26 on a 34s Twixtle log:
@@ -296,6 +302,21 @@ async def _render(log_path: Path, out_path: Path, seconds: float, speed: float =
     if meta is None:
         raise ValueError("the game log has no page size")
     w, h = int(meta["data"]["width"]), int(meta["data"]["height"])
+    # A PLAYER'S PHONE IS LAID OUT AGAIN AT THE PRESENTERS' SIZE (2026-11-26). The log is the page,
+    # not a picture of it, so it can be laid out at any size: a phone's tall narrow screen, fitted
+    # into the video's game panel, left wide empty columns either side (Jake's first phone take).
+    # The presenters' recorder lays each game out at its own width, at the panel's shape; a log
+    # recorded at another size is replayed at that one, and the page reflows to it as it would
+    # have on a laptop. Pointer positions would no longer match, which is why it is not done to a
+    # log already within a tenth of that size: those are the presenters' own.
+    lw = LAYOUT_WIDTH.get(log.get("game") or "")
+    if lw:
+        lh = round(lw * GAME_PANEL[1] / GAME_PANEL[0])
+        if abs(w - lw) > lw * 0.1 or abs(h - lh) > lh * 0.1:
+            for e in events:
+                if e.get("type") == 4 or (e.get("type") == 3 and (e.get("data") or {}).get("source") == 4):
+                    e["data"]["width"], e["data"]["height"] = lw, lh
+            w, h = lw, lh
     scale = WIDE / w
     first = events[0]["timestamp"]
     start_offset = max(0, cam0 - first)          # into the log, where the camera started
