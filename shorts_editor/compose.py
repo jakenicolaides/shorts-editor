@@ -100,6 +100,18 @@ HOLD_S = 10.0
 def stack_filters(out: str = "st", game: str = "0:v", cam: str = "1:v") -> list:
     """The picture: the webcam over the game, as ffmpeg filters ending in [out]. The one
     statement of the layout, used by the join below and by the render (render.py)."""
+    ov = os.environ.get("STACK_OVERLAY")
+    if ov:
+        # EXPERIMENT (replay.py, REPLAY_LAYOUT=fullscreen): the game fills the frame and the camera
+        # covers the rectangle named here (the game's keyboard), cropped to fill it, kept a little below
+        # centre, where a selfie held at arm's length has its face.
+        x, y, w, h = (int(v) for v in ov.split(","))
+        return [
+            f"[{game}]fps={FPS},tpad=stop_mode=clone:stop_duration={HOLD_S:g},scale={W}:{H}:flags=lanczos,setsar=1[_game]",
+            f"[{cam}]fps={FPS},tpad=stop_mode=clone:stop_duration={HOLD_S:g},"
+            f"scale={w}:{h}:force_original_aspect_ratio=increase:flags=lanczos,crop={w}:{h}:(iw-{w})/2:(ih-{h})*0.6,setsar=1[_cam]",
+            f"[_game][_cam]overlay={x}:{y}:shortest=1,format=yuv420p[{out}]",
+        ]
     return [
         # the webcam fills its panel and is cropped to it; the game is fitted whole inside its own
         # A landscape webcam (a presenter's) fills its panel and is cropped to it, as it always was. An
