@@ -27,7 +27,6 @@ import os  # noqa: E402
 import boto3  # noqa: E402
 
 os.environ["REPLAY_PROFILE"] = "player"   # a player's own video (replay.py: what it leaves out of the redraw)
-os.environ.setdefault("REPLAY_NO_KEYBOARD", "1")   # players' videos without the keyboard, the board filling the panel (Jake)
 
 from shorts_editor import worker  # noqa: E402
 from shorts_editor.lambda_handler import BUCKET, KEEP  # noqa: E402
