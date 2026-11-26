@@ -50,9 +50,34 @@ SPEED = 2.0
 
 PAGE = """<!doctype html><html><head><meta charset="utf-8"><style>%s
 html, body { margin: 0; padding: 0; background: #fff; overflow: hidden; }
-.replayer-mouse, .replayer-mouse-tail { display: none !important; }
+.replayer-mouse-tail { display: none !important; }
 .replayer-wrapper { position: absolute; top: 0; left: 0; }
 </style></head><body></body></html>"""
+
+# THE POINTER IS DRAWN (Jake, 2026-11-26: it shows what the presenter is talking about). The
+# game logs where the mouse is (sampling.mousemove in armGameLog) and rrweb's player moves its
+# own pointer element; this dresses that element as our arrow (replay/cursor.png, Jake's, filled
+# white so it reads on the dark squares), sized for the finished video and with its tip on the
+# point, plus a small pulse on each click. The player's own dot under the pointer is off.
+CURSOR_PX = 54          # the arrow's height in the finished 1080-wide game
+CURSOR_TIP = (0.066, 0.006)   # where the tip sits in cursor.png, as fractions of its size
+CURSOR_CSS = """
+.replayer-mouse { width: %(w).2fpx !important; height: %(h).2fpx !important; margin-left: %(mx).2fpx; margin-top: %(my).2fpx;
+  background-image: url(data:image/png;base64,%(png)s) !important; background-size: 100%% 100%% !important;
+  transition: left .04s linear, top .04s linear; z-index: 10; filter: drop-shadow(0 1px 1.5px rgba(0,0,0,.35)); }
+.replayer-mouse:after { position: absolute; left: %(tx).2fpx; top: %(ty).2fpx; width: %(dot).2fpx; height: %(dot).2fpx;
+  background: rgba(0,0,0,.28); opacity: 0; }
+.replayer-mouse.active:after { animation: ps-click .3s ease-out 1; }
+@keyframes ps-click { 0%% { opacity: .55; transform: translate(-50%%,-50%%) scale(.4); } 100%% { opacity: 0; transform: translate(-50%%,-50%%) scale(1.6); } }
+"""
+
+
+def _cursor_css(scale: float) -> str:
+    h = CURSOR_PX / scale
+    w = h * 60 / 96
+    tx, ty = CURSOR_TIP[0] * w, CURSOR_TIP[1] * h
+    png = base64.b64encode((HERE / "cursor.png").read_bytes()).decode()
+    return CURSOR_CSS % {"w": w, "h": h, "mx": -tx, "my": -ty, "tx": tx, "ty": ty, "dot": 26 / scale, "png": png}
 
 SOUND_JS = r"""
 async ([sounds, seconds]) => {
@@ -216,7 +241,7 @@ async def _render(log_path: Path, out_path: Path, seconds: float, speed: float =
         W, H = round(w * scale), round(h * scale)
         ctx = await browser.new_context(viewport={"width": W, "height": H}, device_scale_factor=1)
         page = await ctx.new_page()
-        await page.set_content(PAGE % css)
+        await page.set_content(PAGE % (css + _cursor_css(scale)))
         await page.add_script_tag(path=str(HERE / "rrweb.umd.min.cjs"))
 
         # the sound first, all at once: it does not need real time
@@ -228,6 +253,7 @@ async def _render(log_path: Path, out_path: Path, seconds: float, speed: float =
 
         await page.evaluate("""(ev) => {
           window.R = new rrweb.Replayer(ev, { root: document.body, mouseTail: false, showWarning: false,
+                                              UNSAFE_replayCanvas: true,   /* Vowelsweeper's confetti is a canvas, logged as pictures */
                                               skipInactive: false, triggerFocus: false, speed: %s });
           window.R.wrapper.style.transform = 'scale(%s)';
           window.R.wrapper.style.transformOrigin = '0 0';
@@ -235,33 +261,28 @@ async def _render(log_path: Path, out_path: Path, seconds: float, speed: float =
         await page.evaluate("off => window.R.pause(off)", start_offset)
         await page.wait_for_timeout(int(SETTLE_S * 1000))
 
-        ff = subprocess.Popen([
-            "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
-            "-f", "image2pipe", "-framerate", str(FPS), "-c:v", "mjpeg", "-i", "-",
-            "-i", str(wav), "-map", "0:v", "-map", "1:a",
-            "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2,format=yuv420p",
-            "-c:v", "libx264", "-preset", "veryfast", "-crf", "16", "-r", str(FPS),
-            "-c:a", "aac", "-b:a", "192k", "-t", f"{seconds:.3f}", str(out_path)], stdin=subprocess.PIPE)
-
-        state = {"last": None, "n": 0, "t0": None, "got": 0}
-        total = int(round(seconds * FPS))
-
-        def put_until(slot):
-            while state["n"] < min(slot, total) and state["last"] is not None:
-                ff.stdin.write(state["last"]); state["n"] += 1
-
+        # FRAMES ARE ONLY SAVED WHILE THE PLAYER RUNS, never encoded. Encoding as they arrived meant
+        # that after a long still stretch the handler wrote every held frame at once (46 seconds of a
+        # Vowelsweeper take is 1,380 of them) and the screencast's next frames were dropped meanwhile:
+        # the double taps that followed never appeared (Jake's first take, 2026-11-26). So each frame
+        # goes to a file with its time, and ffmpeg lays them on a steady 30 a second at the end.
+        import tempfile
+        fdir = Path(tempfile.mkdtemp(prefix="replay-", dir=str(out_path.parent)))
+        shots = []                      # (video seconds, path); the still before play stands at 0
+        state = {"t0": None, "got": 0}
         cdp = await ctx.new_cdp_session(page)
 
         def on_frame(params):
             asyncio.ensure_future(cdp.send("Page.screencastFrameAck", {"sessionId": params["sessionId"]}))
             ts = params["metadata"]["timestamp"]
-            jpg = base64.b64decode(params["data"])
+            path = fdir / f"{state['got']:06d}.jpg"
+            path.write_bytes(base64.b64decode(params["data"]))
             state["got"] += 1
-            if state["t0"] is None:          # the still before play: it fills the lead-in and stands until play
-                state["last"] = jpg
-                return
-            put_until(int(round(((ts - state["t0"]) * speed + lead_in) * FPS)))
-            state["last"] = jpg
+            at = 0.0 if state["t0"] is None else (ts - state["t0"]) * speed + lead_in
+            if state["t0"] is None and shots:
+                shots[-1] = (0.0, path)   # only the latest still before play counts
+            else:
+                shots.append((at, path))
 
         cdp.on("Page.screencastFrame", on_frame)
         await cdp.send("Page.startScreencast", {"format": "jpeg", "quality": 92, "everyNthFrame": 1,
@@ -273,18 +294,37 @@ async def _render(log_path: Path, out_path: Path, seconds: float, speed: float =
         await cdp.send("Animation.enable")
         await cdp.send("Animation.setPlaybackRate", {"playbackRate": speed})
         state["t0"] = await page.evaluate("() => { window.R.play(%d); return (performance.timeOrigin + performance.now()) / 1000; }" % start_offset)
-        if state["last"] is not None:
-            put_until(int(round(lead_in * FPS)))
         await page.wait_for_timeout(int((seconds - lead_in) / speed * 1000) + 500)
         await cdp.send("Page.stopScreencast")
-        put_until(total)                                     # a still screen at the end still fills its seconds
-        ff.stdin.close()
-        ok = ff.wait() == 0
         await browser.close()
+
+    # one frame per 30th of a second, each slot showing the newest frame drawn by then
+    total = int(round(seconds * FPS))
+    slots = {}
+    for at, path in sorted(shots, key=lambda x: x[0]):
+        slots[max(0, min(total - 1, int(round(at * FPS))))] = path
+    order = sorted(slots)
+    if not order:
+        raise RuntimeError("the game could not be redrawn from its log: no picture was drawn")
+    lst = fdir / "frames.txt"
+    with open(lst, "w") as f:
+        for i, n in enumerate(order):
+            nxt = order[i + 1] if i + 1 < len(order) else total
+            f.write(f"file '{slots[n]}'\nduration {(nxt - n) / FPS:.6f}\n")
+        f.write(f"file '{slots[order[-1]]}'\n")
+    r = subprocess.run([
+        "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+        "-f", "concat", "-safe", "0", "-i", str(lst), "-i", str(wav), "-map", "0:v", "-map", "1:a",
+        "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2,format=yuv420p", "-fps_mode", "cfr", "-r", str(FPS),
+        "-c:v", "libx264", "-preset", "veryfast", "-crf", "16",
+        "-c:a", "aac", "-b:a", "192k", "-t", f"{seconds:.3f}", str(out_path)])
+    ok = r.returncode == 0
+    import shutil
+    shutil.rmtree(fdir, ignore_errors=True)
     wav.unlink(missing_ok=True)
     if not ok or not out_path.exists():
         raise RuntimeError("the game could not be redrawn from its log")
-    return {"frames_drawn": state["got"], "frames_written": state["n"], "seconds": round(time.time() - t_all, 1),
+    return {"frames_drawn": state["got"], "frames_written": total, "seconds": round(time.time() - t_all, 1),
             "sound_seconds": round(t_sound, 1), "sounds": snd["made"], "sounds_missing": snd["missing"],
             "size": [w, h], "scale": round(scale, 3), "speed": speed, "lead_in": round(lead_in, 3), "solved_at": solved_at}
 
