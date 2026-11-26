@@ -69,10 +69,7 @@ LAYOUT_WIDTH = {"twixtle": 750, "vowelsweeper": 530}
 PLAYER_LAYOUT_WIDTH = {}
 PLAYER_HIDE = {"twixtle": [".countdown-strip"]}
 GAME_PANEL = (1080, 1158)
-# The experiment's split (Jake): the game on top without its keyboard, the camera BELOW it in a band
-# twice the keyboard's height (the keyboard measured 422 of the 1920 on a phone layout), so the game is
-# pushed up rather than covered.
-BOTTOM_CAM_H = 844
+OVERLAY_HEIGHTS = 2   # the full-screen experiment's camera, in keyboard heights
 
 SETTLE_S = 2.0       # for the player's fonts and images to arrive before anything is filmed
 # How much faster than real time the log is played. Measured 2026-11-26 on a 34s Twixtle log:
@@ -329,7 +326,7 @@ async def _render(log_path: Path, out_path: Path, seconds: float, speed: float =
     if fullscreen:
         lw = 460
     if lw:
-        lh = round(lw * ((1920 - BOTTOM_CAM_H) / 1080 if fullscreen else GAME_PANEL[1] / GAME_PANEL[0]))
+        lh = round(lw * (1920 / 1080 if fullscreen else GAME_PANEL[1] / GAME_PANEL[0]))
         if abs(w - lw) > lw * 0.1 or abs(h - lh) > lh * 0.1:
             for e in events:
                 if e.get("type") == 4 or (e.get("type") == 3 and (e.get("data") or {}).get("source") == 4):
@@ -347,8 +344,7 @@ async def _render(log_path: Path, out_path: Path, seconds: float, speed: float =
     solved_at = round(solved[0], 2) if solved and 0 <= solved[0] <= seconds else None
     css = (HERE / "rrweb.css").read_text()
     hide = [sel + " { display: none !important; }" for sel in
-            [".ps-rec-ui", ".app-footer"] + (PLAYER_HIDE.get(log.get("game") or "", []) if player else [])
-            + ([".keyboard"] if os.environ.get("REPLAY_PROFILE") == "player" and os.environ.get("REPLAY_LAYOUT") == "fullscreen" else [])]
+            [".ps-rec-ui", ".app-footer"] + (PLAYER_HIDE.get(log.get("game") or "", []) if player else [])]
     pointer = log.get("game") in POINTER_GAMES
     t_all = time.time()
 
@@ -399,7 +395,17 @@ async def _render(log_path: Path, out_path: Path, seconds: float, speed: float =
         await page.evaluate(PAGE_JS, [speed, pointer])
         await page.evaluate("off => window.R.pause(off)", start_offset)
         await page.wait_for_timeout(int(SETTLE_S * 1000))
-        overlay = BOTTOM_CAM_H if fullscreen else None   # the camera band's height, for compose.py
+        overlay = None
+        if fullscreen:   # where the keyboard is, in the finished picture's pixels
+            r = await page.evaluate("""() => { const f = document.querySelector('.replayer-wrapper iframe');
+              const k = f && f.contentDocument && f.contentDocument.querySelector('.keyboard');
+              if (!k) return null; const b = k.getBoundingClientRect(); return [b.left, b.top, b.width, b.height]; }""")
+            if r and r[2] > 0 and r[3] > 0:
+                # OVERLAY_HEIGHTS keyboards tall, its bottom edge kept on the keyboard's (Jake: one keyboard's
+                # height fitted only a band of a face); it rises over the move types and feedback line
+                x, y, kw, kh = r
+                r = [x, y + kh - kh * OVERLAY_HEIGHTS, kw, kh * OVERLAY_HEIGHTS]
+                overlay = [int(round(v * scale / 2)) * 2 for v in r]
 
         # FRAMES ARE ONLY SAVED WHILE THE PLAYER RUNS, never encoded. Encoding as they arrived meant
         # that after a long still stretch the handler wrote every held frame at once (46 seconds of a
