@@ -337,7 +337,10 @@ async def _render(log_path: Path, out_path: Path, seconds: float, speed: float =
     solved_at = round(solved[0], 2) if solved and 0 <= solved[0] <= seconds else None
     css = (HERE / "rrweb.css").read_text()
     hide = [sel + " { display: none !important; }" for sel in
-            [".ps-rec-ui", ".app-footer"] + (PLAYER_HIDE.get(log.get("game") or "", []) if player else [])]
+            [".ps-rec-ui", ".app-footer"] + (PLAYER_HIDE.get(log.get("game") or "", []) if player else [])
+            # EXPERIMENT (REPLAY_NO_KEYBOARD=1, Jake 2026-11-26): the same layout with the keyboard taken
+            # out, so the board grows into its space
+            + ([".keyboard"] if player and os.environ.get("REPLAY_NO_KEYBOARD") == "1" else [])]
     pointer = log.get("game") in POINTER_GAMES
     t_all = time.time()
 
