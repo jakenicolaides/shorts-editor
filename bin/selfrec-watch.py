@@ -14,6 +14,7 @@ Only takes named selfrec-*: presenters' takes always go to the function.
 """
 import json
 import shutil
+import threading
 import sys
 import time
 import traceback
@@ -48,6 +49,15 @@ def pending(s3):
     return [(i, k) for i, k in ids.items() if i not in done]
 
 
+def cancelled(s3, req_key: str) -> bool:
+    """The phone's Cancel deletes the request note; an edit that finds it gone keeps nothing."""
+    try:
+        s3.head_object(Bucket=BUCKET, Key=req_key)
+        return False
+    except Exception:
+        return True
+
+
 def edit(s3, take: str, req_key: str):
     ev = json.loads(s3.get_object(Bucket=BUCKET, Key=req_key)["Body"].read())
     base = f"takes/{take}/"
@@ -62,23 +72,50 @@ def edit(s3, take: str, req_key: str):
             found["game" if name == "game.json" else "cam"] = tmp / name
     t0 = time.time()
     res = {"stage": "failed", "error": None, "run": ev.get("run")}
+    # The edit's progress, sent on to storage every two seconds for the phone's bar (progress.py), and a
+    # cancel noticed on the way: the phone's Cancel deletes the take's request note.
+    prog = tmp / "progress.json"
+    os.environ["PROGRESS_FILE"] = str(prog)
+    stop = threading.Event()
+
+    def send_progress():
+        last = None
+        while not stop.wait(2):
+            try:
+                body = prog.read_bytes()
+                if body != last:
+                    s3.put_object(Bucket=BUCKET, Key=f"{base}edit/progress.json", Body=body, ContentType="application/json")
+                    last = body
+            except Exception:
+                pass
+    threading.Thread(target=send_progress, daemon=True).start()
     try:
         if set(found) != {"game", "cam"}:
             raise FileNotFoundError("the take is missing a track")
         r = worker.run(found["game"], found["cam"], ev.get("game") or "twixtle", ev.get("date"),
                        ev.get("track") or "daily", 0.0, ev.get("title"))
         job = Path(r["dir"])
-        for name in KEEP:
+        if not cancelled(s3, req_key):
+          for name in KEEP:
             f = job / name
             if f.exists():
                 s3.upload_file(str(f), BUCKET, f"{base}edit/{name}",
                                ExtraArgs={"ContentType": "video/mp4" if name.endswith(".mp4") else "application/json"})
+        shutil.rmtree(job, ignore_errors=True)
         res.update({"stage": r["stage"], "error": r["error"], "final_duration": r["final_duration"],
                     "flags": r["flags"], "title": r["title"]})
         print(f"  edited in {time.time() - t0:.0f}s: {r['stage']} {r['final_duration']}s {r.get('replay', {}).get('size')}", flush=True)
     except Exception as e:
         res["error"] = str(e)[:300]
         traceback.print_exc()
+    stop.set()
+    os.environ.pop("PROGRESS_FILE", None)
+    if cancelled(s3, req_key):   # they gave up waiting: nothing of the take may be left behind
+        for o in s3.list_objects_v2(Bucket=BUCKET, Prefix=base).get("Contents", []):
+            s3.delete_object(Bucket=BUCKET, Key=o["Key"])
+        print("  cancelled by the player: everything deleted", flush=True)
+        shutil.rmtree(tmp, ignore_errors=True)
+        return
     res["seconds"] = round(time.time() - t0, 1)
     res["cpu"] = "Jake's Mac"
     s3.put_object(Bucket=BUCKET, Key=f"{base}edit/result.json", Body=json.dumps(res).encode(), ContentType="application/json")

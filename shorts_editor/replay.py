@@ -428,7 +428,12 @@ async def _render(log_path: Path, out_path: Path, seconds: float, speed: float =
         await cdp.send("Animation.enable")
         await cdp.send("Animation.setPlaybackRate", {"playbackRate": speed})
         state["t0"] = await page.evaluate("() => { window.R.play(%d); return (performance.timeOrigin + performance.now()) / 1000; }" % start_offset)
-        await page.wait_for_timeout(int((seconds - lead_in) / speed * 1000) + 500)
+        from . import progress
+        wait_s = (seconds - lead_in) / speed + 0.5
+        t_play = time.time()
+        while time.time() - t_play < wait_s:   # waited in steps, so a player's phone can show how far it has got
+            await page.wait_for_timeout(int(min(1.0, wait_s - (time.time() - t_play)) * 1000) + 1)
+            progress.report("draw", 0.65 * min(1.0, (time.time() - t_play) / wait_s))
         await cdp.send("Page.stopScreencast")
         await browser.close()
 

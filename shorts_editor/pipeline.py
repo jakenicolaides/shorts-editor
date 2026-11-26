@@ -89,6 +89,15 @@ class Job:
         st.update(extra)
         st["updated"] = time.time()
         _write(self.dir / "status.json", st)
+        # a player's phone shows the edit's progress (progress.py); the steps after the redraw
+        from . import progress
+        s, p = st.get("stage"), st.get("progress") or 0
+        if s == "cut":
+            progress.report("cut", 0.66)
+        elif s == "loudness":
+            progress.report("sound", 0.70)
+        elif s == "render":
+            progress.report("render", 0.70 + 0.28 * max(0.0, min(1.0, (p - 55) / 40)))
 
     @property
     def input(self):
