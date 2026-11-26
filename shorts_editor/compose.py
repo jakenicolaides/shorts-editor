@@ -104,12 +104,12 @@ def stack_filters(out: str = "st", game: str = "0:v", cam: str = "1:v") -> list:
         # the webcam fills its panel and is cropped to it; the game is fitted whole inside its own
         # A landscape webcam (a presenter's) fills its panel and is cropped to it, as it always was. An
         # UPRIGHT camera (a phone held upright, a player recording themselves) is fitted WHOLE, with
-        # white either side (Jake, 2026-11-26): cropped, a selfie lost its top and bottom and read as
+        # black either side (Jake, 2026-11-26): cropped, a selfie lost its top and bottom and read as
         # zoomed in. One chain does both, choosing by the picture's own shape, so nothing is passed.
         f"[{cam}]fps={FPS},tpad=stop_mode=clone:stop_duration={HOLD_S:g},"
         f"scale=w='trunc(iw*if(gt(ih,iw),min({W}/iw,{CAM_H}/ih),max({W}/iw,{CAM_H}/ih))/2)*2'"
         f":h='trunc(ih*if(gt(ih,iw),min({W}/iw,{CAM_H}/ih),max({W}/iw,{CAM_H}/ih))/2)*2':flags=lanczos,"
-        f"crop=w='min(iw,{W})':h='min(ih,{CAM_H})',pad={W}:{CAM_H}:(ow-iw)/2:(oh-ih)/2:color=white,setsar=1[_cam]",
+        f"crop=w='min(iw,{W})':h='min(ih,{CAM_H})',pad={W}:{CAM_H}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1[_cam]",
         f"[{game}]fps={FPS},tpad=stop_mode=clone:stop_duration={HOLD_S:g},scale={W}:{GAME_H}:force_original_aspect_ratio=decrease:flags=lanczos,"
         f"pad={W}:{GAME_H}:(ow-iw)/2:(oh-ih)/2:color={GAME_BG},setsar=1[_game]",
         f"[_cam][_game]vstack=inputs=2:shortest=1,format=yuv420p[{out}]",

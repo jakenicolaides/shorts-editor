@@ -61,6 +61,11 @@ def _allowed(url: str) -> bool:
 # Each game's layout width in the presenters' recorder (record.js, LAYOUT_WIDTH), and the video's
 # game panel (compose.py: 1080 by 1920 less the camera's 762).
 LAYOUT_WIDTH = {"twixtle": 750, "vowelsweeper": 530}
+# A PLAYER'S OWN RECORDING (REPLAY_PROFILE=player, set for selfrec takes) draws the game without its
+# keyboard, at the board's own width, so the board fills the panel (Jake: the presenters' 750 wide
+# left wide margins round Twixtle's 460px column). The keyboard is only how a player typed.
+PLAYER_LAYOUT_WIDTH = {"twixtle": 460}
+PLAYER_HIDE = {"twixtle": [".keyboard", ".countdown-strip"]}
 GAME_PANEL = (1080, 1158)
 
 SETTLE_S = 2.0       # for the player's fonts and images to arrive before anything is filmed
@@ -309,7 +314,8 @@ async def _render(log_path: Path, out_path: Path, seconds: float, speed: float =
     # recorded at another size is replayed at that one, and the page reflows to it as it would
     # have on a laptop. Pointer positions would no longer match, which is why it is not done to a
     # log already within a tenth of that size: those are the presenters' own.
-    lw = LAYOUT_WIDTH.get(log.get("game") or "")
+    player = os.environ.get("REPLAY_PROFILE") == "player"
+    lw = (PLAYER_LAYOUT_WIDTH if player else {}).get(log.get("game") or "") or LAYOUT_WIDTH.get(log.get("game") or "")
     if lw:
         lh = round(lw * GAME_PANEL[1] / GAME_PANEL[0])
         if abs(w - lw) > lw * 0.1 or abs(h - lh) > lh * 0.1:
@@ -328,6 +334,8 @@ async def _render(log_path: Path, out_path: Path, seconds: float, speed: float =
               if e.get("type") == 5 and (e.get("data") or {}).get("tag") == "solved"]
     solved_at = round(solved[0], 2) if solved and 0 <= solved[0] <= seconds else None
     css = (HERE / "rrweb.css").read_text()
+    hide = [sel + " { display: none !important; }" for sel in
+            [".ps-rec-ui", ".app-footer"] + (PLAYER_HIDE.get(log.get("game") or "", []) if player else [])]
     pointer = log.get("game") in POINTER_GAMES
     t_all = time.time()
 
@@ -369,11 +377,11 @@ async def _render(log_path: Path, out_path: Path, seconds: float, speed: float =
                                                  page; the video is the game, so they are hidden in the redraw */
                                               /* and the site footer, which a presenter's recording never shows (Twixtle's
                                                  body.recording hides it) and a player's own does, on screen */
-                                              insertStyleRules: ['.ps-rec-ui { display: none !important; }', '.app-footer { display: none !important; }'],
+                                              insertStyleRules: %s,
                                               skipInactive: false, triggerFocus: false, speed: %s });
           window.R.wrapper.style.transform = 'scale(%s)';
           window.R.wrapper.style.transformOrigin = '0 0';
-        }""" % (speed, scale), events)
+        }""" % (json.dumps(hide), speed, scale), events)
         await page.evaluate("s => { window.SCALE = s; }", scale)
         await page.evaluate(PAGE_JS, [speed, pointer])
         await page.evaluate("off => window.R.pause(off)", start_offset)
