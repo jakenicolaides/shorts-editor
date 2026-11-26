@@ -61,12 +61,12 @@ def _allowed(url: str) -> bool:
 # Each game's layout width in the presenters' recorder (record.js, LAYOUT_WIDTH), and the video's
 # game panel (compose.py: 1080 by 1920 less the camera's 762).
 LAYOUT_WIDTH = {"twixtle": 750, "vowelsweeper": 530}
-# A PLAYER'S OWN RECORDING (REPLAY_PROFILE=player, set for selfrec takes) draws the game at the
-# board's own width, so the board fills the panel (Jake: the presenters' 750 wide left wide margins
-# round Twixtle's 460px column). The keyboard is in it (Jake, 2026-11-26: it was left out for an
-# hour as "only how a player typed", and the video read better with it): at 460 wide the panel is
-# 493 tall, which is the game's own short-screen layout.
-PLAYER_LAYOUT_WIDTH = {"twixtle": 460}
+# A PLAYER'S OWN RECORDING (REPLAY_PROFILE=player, set for selfrec takes) is laid out as the
+# presenters' is: at the game's LAYOUT_WIDTH, so Twixtle's 460px column has the page's margins
+# either side, with its keyboard. For an hour on 2026-11-26 it was drawn 460 wide with no keyboard,
+# so the board filled the panel; Jake put both back the same evening. A width here overrides
+# LAYOUT_WIDTH for players' takes only, should that be wanted again.
+PLAYER_LAYOUT_WIDTH = {}
 PLAYER_HIDE = {"twixtle": [".countdown-strip"]}
 GAME_PANEL = (1080, 1158)
 

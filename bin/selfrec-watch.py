@@ -26,7 +26,7 @@ import os  # noqa: E402
 
 import boto3  # noqa: E402
 
-os.environ["REPLAY_PROFILE"] = "player"   # a player's own video: the board at its own width (replay.py)
+os.environ["REPLAY_PROFILE"] = "player"   # a player's own video (replay.py: what it leaves out of the redraw)
 
 from shorts_editor import worker  # noqa: E402
 from shorts_editor.lambda_handler import BUCKET, KEEP  # noqa: E402
