@@ -42,6 +42,11 @@ HERE = Path(__file__).parent / "replay"
 WIDE = 1080          # the game's width in the finished video (compose.py)
 FPS = 30
 SETTLE_S = 2.0       # for the player's fonts and images to arrive before anything is filmed
+# How much faster than real time the log is played. Measured 2026-11-26 on a 34s Twixtle log:
+# at 2x every animation kept all its frames (the picture changes counted the same as at 1x);
+# at 4x and 8x about half and a third were lost, because the screencast draws only so many
+# frames a second, so shakes and slides went choppy. REPLAY_SPEED overrides it.
+SPEED = 2.0
 
 PAGE = """<!doctype html><html><head><meta charset="utf-8"><style>%s
 html, body { margin: 0; padding: 0; background: #fff; overflow: hidden; }
@@ -109,12 +114,13 @@ def _wav(path: Path, pcm: bytes, rate=48000):
         w.setnchannels(1); w.setsampwidth(2); w.setframerate(rate); w.writeframes(pcm)
 
 
-def render(log_path: Path, out_path: Path, seconds: float) -> dict:
+def render(log_path: Path, out_path: Path, seconds: float, speed: float = None) -> dict:
     """The game track for `seconds` of camera, from the log at log_path, into out_path (mp4)."""
-    return asyncio.run(_render(Path(log_path), Path(out_path), float(seconds)))
+    speed = float(speed or os.environ.get("REPLAY_SPEED") or SPEED)
+    return asyncio.run(_render(Path(log_path), Path(out_path), float(seconds), speed))
 
 
-async def _render(log_path: Path, out_path: Path, seconds: float) -> dict:
+async def _render(log_path: Path, out_path: Path, seconds: float, speed: float = 1.0) -> dict:
     from playwright.async_api import async_playwright
     log = load(log_path)
     events = sorted(log["events"], key=lambda e: e["timestamp"])
@@ -160,10 +166,10 @@ async def _render(log_path: Path, out_path: Path, seconds: float) -> dict:
 
         await page.evaluate("""(ev) => {
           window.R = new rrweb.Replayer(ev, { root: document.body, mouseTail: false, showWarning: false,
-                                              skipInactive: false, triggerFocus: false, speed: 1 });
+                                              skipInactive: false, triggerFocus: false, speed: %s });
           window.R.wrapper.style.transform = 'scale(%s)';
           window.R.wrapper.style.transformOrigin = '0 0';
-        }""" % scale, events)
+        }""" % (speed, scale), events)
         await page.evaluate("off => window.R.pause(off)", start_offset)
         await page.wait_for_timeout(int(SETTLE_S * 1000))
 
@@ -192,7 +198,7 @@ async def _render(log_path: Path, out_path: Path, seconds: float) -> dict:
             if state["t0"] is None:          # the still before play: it fills the lead-in and stands until play
                 state["last"] = jpg
                 return
-            put_until(int(round((ts - state["t0"]) * FPS)))
+            put_until(int(round(((ts - state["t0"]) * speed + lead_in) * FPS)))
             state["last"] = jpg
 
         cdp.on("Page.screencastFrame", on_frame)
@@ -200,10 +206,14 @@ async def _render(log_path: Path, out_path: Path, seconds: float) -> dict:
                                                   "maxWidth": W, "maxHeight": H})
         await page.wait_for_timeout(300)                     # the paused still arrives
         # second 0 of the video is when the player starts, less the lead-in where the log had not begun
-        state["t0"] = (await page.evaluate("() => { window.R.play(%d); return (performance.timeOrigin + performance.now()) / 1000; }" % start_offset)) - lead_in
+        # faster than real time: the player's clock AND every CSS animation in the page run at `speed`,
+        # and a frame drawn s seconds after play stands for s * speed seconds of the game
+        await cdp.send("Animation.enable")
+        await cdp.send("Animation.setPlaybackRate", {"playbackRate": speed})
+        state["t0"] = await page.evaluate("() => { window.R.play(%d); return (performance.timeOrigin + performance.now()) / 1000; }" % start_offset)
         if state["last"] is not None:
             put_until(int(round(lead_in * FPS)))
-        await page.wait_for_timeout(int((seconds - lead_in) * 1000) + 500)
+        await page.wait_for_timeout(int((seconds - lead_in) / speed * 1000) + 500)
         await cdp.send("Page.stopScreencast")
         put_until(total)                                     # a still screen at the end still fills its seconds
         ff.stdin.close()
@@ -214,7 +224,7 @@ async def _render(log_path: Path, out_path: Path, seconds: float) -> dict:
         raise RuntimeError("the game could not be redrawn from its log")
     return {"frames_drawn": state["got"], "frames_written": state["n"], "seconds": round(time.time() - t_all, 1),
             "sound_seconds": round(t_sound, 1), "sounds": snd["made"], "sounds_missing": snd["missing"],
-            "size": [w, h], "scale": round(scale, 3), "lead_in": round(lead_in, 3), "solved_at": solved_at}
+            "size": [w, h], "scale": round(scale, 3), "speed": speed, "lead_in": round(lead_in, 3), "solved_at": solved_at}
 
 
 if __name__ == "__main__":

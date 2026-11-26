@@ -82,8 +82,11 @@ the player (the screencast ignores a device scale). Sound is made again from the
 events in an OfflineAudioContext, so it is the game's own Web Audio. The game also marks the
 solve, which becomes `meta.solve_at` and replaces listening for the chime. Measured on a 34s
 Twixtle log: picture and sound within 30 ms, the solve chime 0.53 against the template (under
-the 0.55 bar, which is why the mark exists). **Costs real time**: a take's length is added to
-the Lambda run, so a take over about 9 minutes would pass the 15 minute limit. **Not yet
+the 0.55 bar, which is why the mark exists). **Played at 2x** (`SPEED`): the player's clock and
+every CSS animation run twice as fast (`Animation.setPlaybackRate`) and frame times are scaled
+back. 2x kept every animation frame; 4x and 8x lost half and a third of them (the screencast
+draws only so many frames a second), so do not raise it to save time. It adds half a take's
+length to the Lambda run (a 4 minute take, about 2 minutes). **Not yet
 tried in the Linux image or on Lambda** (the Dockerfile installs Chromium; the launch flags
 for Lambda are in `replay.py`). The redrawn film is stored as `game.mp4` beside the log so a
 note does not draw it again.
