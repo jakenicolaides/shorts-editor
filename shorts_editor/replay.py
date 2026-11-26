@@ -69,6 +69,7 @@ LAYOUT_WIDTH = {"twixtle": 750, "vowelsweeper": 530}
 PLAYER_LAYOUT_WIDTH = {}
 PLAYER_HIDE = {"twixtle": [".countdown-strip"]}
 GAME_PANEL = (1080, 1158)
+OVERLAY_HEIGHTS = 2   # the full-screen experiment's camera, in keyboard heights
 
 SETTLE_S = 2.0       # for the player's fonts and images to arrive before anything is filmed
 # How much faster than real time the log is played. Measured 2026-11-26 on a 34s Twixtle log:
@@ -400,6 +401,10 @@ async def _render(log_path: Path, out_path: Path, seconds: float, speed: float =
               const k = f && f.contentDocument && f.contentDocument.querySelector('.keyboard');
               if (!k) return null; const b = k.getBoundingClientRect(); return [b.left, b.top, b.width, b.height]; }""")
             if r and r[2] > 0 and r[3] > 0:
+                # OVERLAY_HEIGHTS keyboards tall, its bottom edge kept on the keyboard's (Jake: one keyboard's
+                # height fitted only a band of a face); it rises over the move types and feedback line
+                x, y, kw, kh = r
+                r = [x, y + kh - kh * OVERLAY_HEIGHTS, kw, kh * OVERLAY_HEIGHTS]
                 overlay = [int(round(v * scale / 2)) * 2 for v in r]
 
         # FRAMES ARE ONLY SAVED WHILE THE PLAYER RUNS, never encoded. Encoding as they arrived meant

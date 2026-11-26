@@ -109,7 +109,7 @@ def stack_filters(out: str = "st", game: str = "0:v", cam: str = "1:v") -> list:
         return [
             f"[{game}]fps={FPS},tpad=stop_mode=clone:stop_duration={HOLD_S:g},scale={W}:{H}:flags=lanczos,setsar=1[_game]",
             f"[{cam}]fps={FPS},tpad=stop_mode=clone:stop_duration={HOLD_S:g},"
-            f"scale={w}:{h}:force_original_aspect_ratio=increase:flags=lanczos,crop={w}:{h}:(iw-{w})/2:(ih-{h})*0.6,setsar=1[_cam]",
+            f"scale={w}:{h}:force_original_aspect_ratio=increase:flags=lanczos,crop={w}:{h}:(iw-{w})/2:(ih-{h})*0.8,setsar=1[_cam]",
             f"[_game][_cam]overlay={x}:{y}:shortest=1,format=yuv420p[{out}]",
         ]
     return [
