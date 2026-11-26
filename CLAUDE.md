@@ -94,7 +94,11 @@ blocked the handler after a long still stretch (it wrote every held frame at onc
 screencast's next frames were lost, which froze Vowelsweeper over two flips in Jake's first
 take. **The pointer is drawn** (Jake: it shows what the presenter means), as his arrow
 (`replay/cursor.png`), from the mouse movement the games log. **Canvas is replayed**
-(`UNSAFE_replayCanvas`): Vowelsweeper's confetti is a canvas the game logs as pictures.
+(`UNSAFE_replayCanvas`): Vowelsweeper's confetti is a canvas the game logs as pictures. **The redraw's browser reaches twixtle.games and vowelsweeper.games and nothing else**
+(`ALLOWED_ORIGINS` in replay.py): the log is a presenter's and presenters are untrusted, and this
+browser runs with web security off beside the model's key and the bucket's role. A log recorded
+on a dev server needs its address in `REPLAY_ALLOWED_ORIGINS`. **Its Chromium is not on the
+security watch, by choice (Jake, 2026-11-26)**: it is refreshed whenever the image is rebuilt.
 
 ## The editor on Linux (2026-11-20)
 

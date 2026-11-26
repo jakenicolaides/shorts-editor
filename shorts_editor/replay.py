@@ -41,6 +41,22 @@ from pathlib import Path
 HERE = Path(__file__).parent / "replay"
 WIDE = 1080          # the game's width in the finished video (compose.py)
 FPS = 30
+# THE BROWSER REACHES THE GAMES' OWN SITES AND NOTHING ELSE (2026-11-26). The log comes from a
+# presenter's browser and presenters are untrusted, so a crafted one could otherwise make this
+# browser, which runs with web security off inside a function holding the model's key and the
+# bucket's role, fetch anything it names. Every request is checked against these origins (plus
+# data: and blob:, which go nowhere) and anything else is refused before it leaves. A local
+# test of a log recorded on a dev server adds its address with REPLAY_ALLOWED_ORIGINS.
+ALLOWED_ORIGINS = ("https://twixtle.games", "https://vowelsweeper.games")
+
+
+def _allowed(url: str) -> bool:
+    if url.startswith(("data:", "blob:", "about:")):
+        return True
+    extra = tuple(o.strip().rstrip("/") for o in os.environ.get("REPLAY_ALLOWED_ORIGINS", "").split(",") if o.strip())
+    return any(url == o or url.startswith(o + "/") for o in ALLOWED_ORIGINS + extra)
+
+
 SETTLE_S = 2.0       # for the player's fonts and images to arrive before anything is filmed
 # How much faster than real time the log is played. Measured 2026-11-26 on a 34s Twixtle log:
 # at 2x every animation kept all its frames (the picture changes counted the same as at 1x);
@@ -305,6 +321,15 @@ async def _render(log_path: Path, out_path: Path, seconds: float, speed: float =
         # player zoomed, so text is drawn sharp at 1080 (the screencast ignores a device scale)
         W, H = round(w * scale), round(h * scale)
         ctx = await browser.new_context(viewport={"width": W, "height": H}, device_scale_factor=1)
+        refused = []
+
+        async def guard(route):
+            if _allowed(route.request.url):
+                await route.continue_()
+            else:
+                refused.append(route.request.url[:120])
+                await route.abort()
+        await ctx.route("**/*", guard)
         page = await ctx.new_page()
         await page.set_content(PAGE % (css + _cursor_css(scale, pointer)))
         await page.add_script_tag(path=str(HERE / "rrweb.umd.min.cjs"))
@@ -401,7 +426,7 @@ async def _render(log_path: Path, out_path: Path, seconds: float, speed: float =
         raise RuntimeError("the game could not be redrawn from its log")
     return {"frames_drawn": state["got"], "frames_written": total, "seconds": round(time.time() - t_all, 1),
             "sound_seconds": round(t_sound, 1), "sounds": snd["made"], "sounds_missing": snd["missing"],
-            "size": [w, h], "scale": round(scale, 3), "speed": speed, "pointer": pointer, "lead_in": round(lead_in, 3), "solved_at": solved_at}
+            "size": [w, h], "scale": round(scale, 3), "speed": speed, "pointer": pointer, "refused": refused[:10], "lead_in": round(lead_in, 3), "solved_at": solved_at}
 
 
 if __name__ == "__main__":
