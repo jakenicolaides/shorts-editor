@@ -71,6 +71,23 @@ a 4:17 take from 131s (join 51, render 80) to 78s.
   anything listens. Transcribing the microphone alone and finding the chime in the game's
   sound alone would both be cleaner than what OBS ever gave.
 
+## A game redrawn from its log (on trial, 2026-11-26, branch `game-log`, NOT shipped)
+
+A take's game track may be a LOG of the game's screen (`game.json`, gzipped rrweb events plus
+the camera's start time) instead of a film of it, for laptops too slow to film a tab and a
+camera at once. `replay.py` turns it back into the film everything else reads: rrweb's player
+in headless Chromium (Playwright), played in REAL TIME so the game's CSS animations run,
+screencast frames placed on a steady 30 fps by their draw times, drawn at 1080 wide by zooming
+the player (the screencast ignores a device scale). Sound is made again from the log's sound
+events in an OfflineAudioContext, so it is the game's own Web Audio. The game also marks the
+solve, which becomes `meta.solve_at` and replaces listening for the chime. Measured on a 34s
+Twixtle log: picture and sound within 30 ms, the solve chime 0.53 against the template (under
+the 0.55 bar, which is why the mark exists). **Costs real time**: a take's length is added to
+the Lambda run, so a take over about 9 minutes would pass the 15 minute limit. **Not yet
+tried in the Linux image or on Lambda** (the Dockerfile installs Chromium; the launch flags
+for Lambda are in `replay.py`). The redrawn film is stored as `game.mp4` beside the log so a
+note does not draw it again.
+
 ## The editor on Linux (2026-11-20)
 
 **The editor runs on Linux, for the server that will edit ambassadors' takes.** The only

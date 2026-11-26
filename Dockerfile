@@ -8,6 +8,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg && rm -r
 WORKDIR /app
 COPY requirements-linux.txt .
 RUN pip install --no-cache-dir -r requirements-linux.txt
+# Headless Chromium for replay.py (a game redrawn from its log), with the libraries it needs.
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/playwright
+RUN python -m playwright install --with-deps --only-shell chromium && rm -rf /var/lib/apt/lists/*
 
 # The speech model goes INTO the image (1.6 GB): a server that fetched it per take
 # would spend longer downloading than editing, and would depend on another site being up.

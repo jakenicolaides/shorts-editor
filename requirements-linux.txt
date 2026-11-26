@@ -8,3 +8,4 @@ anthropic
 pydantic
 boto3
 awslambdaric   # what lets the same image run as a Lambda function
+playwright==1.65.2   # headless Chromium, to redraw a game from its log (replay.py)

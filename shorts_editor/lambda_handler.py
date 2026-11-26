@@ -220,11 +220,13 @@ def _edit(event):
     t0 = time.time()
     found = {}
     for obj in s3.list_objects_v2(Bucket=BUCKET, Prefix=base).get("Contents", []):
-        m = re.fullmatch(re.escape(base) + r"(game|cam)\.(mp4|webm|mov|mkv)", obj["Key"])
+        # game.json is a LOG of the game's screen (the recorder's ?game=log), redrawn by worker.run
+        m = re.fullmatch(re.escape(base) + r"(game|cam)\.(mp4|webm|mov|mkv|json)", obj["Key"])
         if m:
             dst = tmp / f"{m.group(1)}.{m.group(2)}"
             s3.download_file(BUCKET, obj["Key"], str(dst))
-            found[m.group(1)] = dst
+            if m.group(1) not in found or m.group(2) == "json":   # a log wins over a film made from it earlier
+                found[m.group(1)] = dst
     if set(found) != {"game", "cam"}:
         raise FileNotFoundError(f"takes/{take}/ needs a game track and a cam track, found: {sorted(found) or 'neither'}")
     fetched = time.time() - t0
@@ -237,6 +239,12 @@ def _edit(event):
     t1 = time.time()
     job_dir = Path(res["dir"])
     _upload(s3, job_dir, base)
+    # A redrawn game is kept beside the log, as game.mp4, so a note re-opens the same picture
+    # instead of drawing it again (_note reads only films).
+    if found["game"].suffix == ".json":
+        for f in job_dir.glob("track_game.*"):
+            s3.upload_file(str(f), BUCKET, f"{base}game{f.suffix}", ExtraArgs={"ContentType": "video/mp4"})
+            break
     res["seconds_fetch"], res["seconds_store"] = round(fetched, 1), round(time.time() - t1, 1)
     res["seconds_model"] = model_seconds
     res["edit"] = f"s3://{BUCKET}/{base}edit/out.mp4" if (job_dir / "out.mp4").exists() else None
