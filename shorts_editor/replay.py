@@ -56,28 +56,88 @@ html, body { margin: 0; padding: 0; background: #fff; overflow: hidden; }
 
 # THE POINTER IS DRAWN (Jake, 2026-11-26: it shows what the presenter is talking about). The
 # game logs where the mouse is (sampling.mousemove in armGameLog) and rrweb's player moves its
-# own pointer element; this dresses that element as our arrow (replay/cursor.png, Jake's, filled
-# white so it reads on the dark squares), sized for the finished video and with its tip on the
-# point, plus a small pulse on each click. The player's own dot under the pointer is off.
-CURSOR_PX = 54          # the arrow's height in the finished 1080-wide game
-CURSOR_TIP = (0.066, 0.006)   # where the tip sits in cursor.png, as fractions of its size
+# own pointer element; this dresses that element as Jake's arrow (replay/cursor.png, his light
+# blue one, made opaque as it looks on white), sized for the finished video with its rounded tip
+# on the point. A click fires a little burst of dashes from the tip (PAGE_JS), his reference.
+CURSOR_PX = 81          # the arrow's height in the finished 1080-wide game (1.5x the first arrow, Jake)
+CURSOR_SIZE = (160, 192)      # cursor.png
+CURSOR_TIP = (0.044, 0.031)   # where the tip sits in cursor.png, as fractions of its size
 CURSOR_CSS = """
 .replayer-mouse { width: %(w).2fpx !important; height: %(h).2fpx !important; margin-left: %(mx).2fpx; margin-top: %(my).2fpx;
   background-image: url(data:image/png;base64,%(png)s) !important; background-size: 100%% 100%% !important;
-  transition: left .04s linear, top .04s linear; z-index: 10; filter: drop-shadow(0 1px 1.5px rgba(0,0,0,.35)); }
-.replayer-mouse:after { position: absolute; left: %(tx).2fpx; top: %(ty).2fpx; width: %(dot).2fpx; height: %(dot).2fpx;
-  background: rgba(0,0,0,.28); opacity: 0; }
-.replayer-mouse.active:after { animation: ps-click .3s ease-out 1; }
-@keyframes ps-click { 0%% { opacity: .55; transform: translate(-50%%,-50%%) scale(.4); } 100%% { opacity: 0; transform: translate(-50%%,-50%%) scale(1.6); } }
+  transition: left .04s linear, top .04s linear; z-index: 10; filter: drop-shadow(0 1px 2px rgba(0,0,0,.3)); }
+.replayer-mouse:after { display: none !important; }
+.ps-burst { position: absolute; z-index: 11; pointer-events: none; width: 0; height: 0; }
+.ps-burst i { position: absolute; left: 0; top: 0; width: %(dl).2fpx; height: %(dw).2fpx; margin-top: %(dm).2fpx;
+  border-radius: %(dw).2fpx; background: #5d7fe6; transform-origin: 0 50%%; opacity: 0;
+  animation: ps-dash .42s ease-out 1 forwards; }
+@keyframes ps-dash {
+  0%%   { opacity: 0; transform: rotate(var(--a)) translateX(%(r0).2fpx) scaleX(.3); }
+  25%%  { opacity: 1; transform: rotate(var(--a)) translateX(%(r1).2fpx) scaleX(1); }
+  100%% { opacity: 0; transform: rotate(var(--a)) translateX(%(r2).2fpx) scaleX(.6); } }
+.ps-confetti { position: absolute; left: 0; top: 0; z-index: 9; pointer-events: none; }
 """
 
 
 def _cursor_css(scale: float) -> str:
     h = CURSOR_PX / scale
-    w = h * 60 / 96
+    w = h * CURSOR_SIZE[0] / CURSOR_SIZE[1]
     tx, ty = CURSOR_TIP[0] * w, CURSOR_TIP[1] * h
     png = base64.b64encode((HERE / "cursor.png").read_bytes()).decode()
-    return CURSOR_CSS % {"w": w, "h": h, "mx": -tx, "my": -ty, "tx": tx, "ty": ty, "dot": 26 / scale, "png": png}
+    return CURSOR_CSS % {"w": w, "h": h, "mx": -tx, "my": -ty, "png": png,
+                         "dl": h * 0.26, "dw": h * 0.075, "dm": -h * 0.0375, "r0": h * 0.12, "r1": h * 0.2, "r2": h * 0.42}
+
+
+# Run in the player's page once it exists: the click burst, and Vowelsweeper's confetti, which the
+# game logs as the burst's starting pieces (a 'confetti' custom event) rather than as pictures of
+# its canvas. Pictures came at 15 a second and looked laggy (Jake); this is the game's own physics
+# (fireConfetti in its index.php: same gravity, drag and pieces), drawn on every frame here, on
+# the player's clock, so it is as smooth as the game was and costs the presenter's laptop nothing.
+PAGE_JS = r"""
+(speed) => {
+  const R = window.R, wrap = R.wrapper;
+  // the burst: five dashes out from the tip, as in Jake's reference (up, up-right, and round to down-left)
+  const ANGLES = [-90, -45, -135, 180, 135];
+  // On each PRESS (a mouse interaction of type MouseDown or TouchStart), where it happened. Not the
+  // player's own click flag: Vowelsweeper's taps log as press and release with no click at all.
+  R.on('event-cast', (e) => {
+    if (!e || e.type !== 3 || !e.data || e.data.source !== 2 || (e.data.type !== 1 && e.data.type !== 7)) return;
+    const b = document.createElement('div'); b.className = 'ps-burst';
+    b.style.left = e.data.x + 'px'; b.style.top = e.data.y + 'px';
+    for (const a of ANGLES) { const i = document.createElement('i'); i.style.setProperty('--a', a + 'deg'); b.appendChild(i); }
+    wrap.appendChild(b);
+    setTimeout(() => b.remove(), 1000 / speed);
+  });
+  R.on('custom-event', (e) => {
+    if (!e || !e.data || e.data.tag !== 'confetti') return;
+    const p = e.data.payload, scale = window.SCALE;
+    const cv = document.createElement('canvas'); cv.className = 'ps-confetti';
+    cv.style.width = p.w + 'px'; cv.style.height = p.h + 'px';
+    cv.width = Math.round(p.w * scale); cv.height = Math.round(p.h * scale);
+    wrap.appendChild(cv);
+    const ctx = cv.getContext('2d'); ctx.setTransform(scale, 0, 0, scale, 0, 0);
+    const bits = p.bits.map(b => Object.assign({}, b));
+    let last = null, elapsed = 0;
+    const step = (ts) => {
+      if (last === null) last = ts;
+      let dt = (ts - last) / 1000 * speed; last = ts;
+      if (dt > 0.05 * speed) dt = 0.05 * speed;
+      elapsed += dt;
+      ctx.clearRect(0, 0, p.w, p.h);
+      let alive = 0;
+      for (const b of bits) {
+        b.vy += p.g * dt; b.vx *= Math.pow(p.drag, dt * 60);
+        b.x += b.vx * dt; b.y += b.vy * dt; b.rot += b.spin * dt;
+        if (b.y < p.h + 40) alive++;
+        ctx.save(); ctx.translate(b.x, b.y); ctx.rotate(b.rot); ctx.fillStyle = b.colour;
+        ctx.fillRect(-b.size / 2, -b.size / 2, b.size, b.size * 0.6); ctx.restore();
+      }
+      if (alive > 0 && elapsed < p.runFor) requestAnimationFrame(step); else cv.remove();
+    };
+    requestAnimationFrame(step);
+  });
+}
+"""
 
 SOUND_JS = r"""
 async ([sounds, seconds]) => {
@@ -258,6 +318,8 @@ async def _render(log_path: Path, out_path: Path, seconds: float, speed: float =
           window.R.wrapper.style.transform = 'scale(%s)';
           window.R.wrapper.style.transformOrigin = '0 0';
         }""" % (speed, scale), events)
+        await page.evaluate("s => { window.SCALE = s; }", scale)
+        await page.evaluate(PAGE_JS, speed)
         await page.evaluate("off => window.R.pause(off)", start_offset)
         await page.wait_for_timeout(int(SETTLE_S * 1000))
 
@@ -315,7 +377,8 @@ async def _render(log_path: Path, out_path: Path, seconds: float, speed: float =
     r = subprocess.run([
         "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
         "-f", "concat", "-safe", "0", "-i", str(lst), "-i", str(wav), "-map", "0:v", "-map", "1:a",
-        "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2,format=yuv420p", "-fps_mode", "cfr", "-r", str(FPS),
+        "-vf", f"scale=trunc(iw/2)*2:trunc(ih/2)*2,format=yuv420p,tpad=stop_mode=clone:stop_duration={seconds:.3f}",
+        "-fps_mode", "cfr", "-r", str(FPS),
         "-c:v", "libx264", "-preset", "veryfast", "-crf", "16",
         "-c:a", "aac", "-b:a", "192k", "-t", f"{seconds:.3f}", str(out_path)])
     ok = r.returncode == 0
