@@ -109,6 +109,16 @@ def edit(s3, take: str, req_key: str):
         r = worker.run(found["game"], found["cam"], ev.get("game") or "twixtle", ev.get("date"),
                        ev.get("track") or "daily", 0.0, ev.get("title"))
         job = Path(r["dir"])
+        # WHILE THE PROTOTYPE IS TRIED (Jake's own takes only): the take's files and the cut stay on this
+        # Mac, so an edit that comes out wrong can be looked into after the phone has deleted the take.
+        keep = WORK / "kept" / take
+        shutil.rmtree(keep, ignore_errors=True)
+        shutil.copytree(tmp, keep, ignore=shutil.ignore_patterns("progress.json"))
+        for name in ("cut.json", "params.json", "meta.json", "transcript.json", "solve.json"):
+            if (job / name).exists():
+                shutil.copy(job / name, keep / name)
+        cut = json.loads((job / "cut.json").read_text()) if (job / "cut.json").exists() else {}
+        print(f"  cut {cut.get('start')}s to {cut.get('end')}s, solve {cut.get('solve_at')}, flags {cut.get('flags')}; kept in {keep}", flush=True)
         if not cancelled(s3, req_key):
           for name in KEEP:
             f = job / name
