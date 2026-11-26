@@ -56,12 +56,14 @@ html, body { margin: 0; padding: 0; background: #fff; overflow: hidden; }
 
 # THE POINTER IS DRAWN (Jake, 2026-11-26: it shows what the presenter is talking about). The
 # game logs where the mouse is (sampling.mousemove in armGameLog) and rrweb's player moves its
-# own pointer element; this dresses that element as Jake's arrow (replay/cursor.png, his light
-# blue one, made opaque as it looks on white), sized for the finished video with its rounded tip
+# own pointer element; this dresses that element as Jake's arrow (replay/cursor.png, his black
+# outline filled white so it reads on the dark squares), sized for the finished video with its rounded tip
 # on the point. A click fires a little burst of dashes from the tip (PAGE_JS), his reference.
-CURSOR_PX = 81          # the arrow's height in the finished 1080-wide game (1.5x the first arrow, Jake)
-CURSOR_SIZE = (160, 192)      # cursor.png
-CURSOR_TIP = (0.044, 0.031)   # where the tip sits in cursor.png, as fractions of its size
+CURSOR_PX = 88          # the arrow's height in the finished 1080-wide game (1.5x the first arrow, Jake)
+# Vowelsweeper only (Jake): pointing at a square is what its talk is about; Twixtle is typed.
+POINTER_GAMES = {"vowelsweeper"}
+CURSOR_SIZE = (176, 208)      # cursor.png
+CURSOR_TIP = (0.082, 0.046)   # where the tip sits in cursor.png, as fractions of its size
 CURSOR_CSS = """
 .replayer-mouse { width: %(w).2fpx !important; height: %(h).2fpx !important; margin-left: %(mx).2fpx; margin-top: %(my).2fpx;
   background-image: url(data:image/png;base64,%(png)s) !important; background-size: 100%% 100%% !important;
@@ -69,7 +71,7 @@ CURSOR_CSS = """
 .replayer-mouse:after { display: none !important; }
 .ps-burst { position: absolute; z-index: 11; pointer-events: none; width: 0; height: 0; }
 .ps-burst i { position: absolute; left: 0; top: 0; width: %(dl).2fpx; height: %(dw).2fpx; margin-top: %(dm).2fpx;
-  border-radius: %(dw).2fpx; background: #5d7fe6; transform-origin: 0 50%%; opacity: 0;
+  border-radius: %(dw).2fpx; background: #111; transform-origin: 0 50%%; opacity: 0;
   animation: ps-dash .42s ease-out 1 forwards; }
 @keyframes ps-dash {
   0%%   { opacity: 0; transform: rotate(var(--a)) translateX(%(r0).2fpx) scaleX(.3); }
@@ -79,7 +81,9 @@ CURSOR_CSS = """
 """
 
 
-def _cursor_css(scale: float) -> str:
+def _cursor_css(scale: float, pointer: bool = True) -> str:
+    if not pointer:
+        return ".replayer-mouse { display: none !important; }\n.ps-confetti { position: absolute; left: 0; top: 0; z-index: 9; pointer-events: none; }"
     h = CURSOR_PX / scale
     w = h * CURSOR_SIZE[0] / CURSOR_SIZE[1]
     tx, ty = CURSOR_TIP[0] * w, CURSOR_TIP[1] * h
@@ -94,13 +98,13 @@ def _cursor_css(scale: float) -> str:
 # (fireConfetti in its index.php: same gravity, drag and pieces), drawn on every frame here, on
 # the player's clock, so it is as smooth as the game was and costs the presenter's laptop nothing.
 PAGE_JS = r"""
-(speed) => {
+([speed, pointer]) => {
   const R = window.R, wrap = R.wrapper;
   // the burst: five dashes out from the tip, as in Jake's reference (up, up-right, and round to down-left)
   const ANGLES = [-90, -45, -135, 180, 135];
   // On each PRESS (a mouse interaction of type MouseDown or TouchStart), where it happened. Not the
   // player's own click flag: Vowelsweeper's taps log as press and release with no click at all.
-  R.on('event-cast', (e) => {
+  if (pointer) R.on('event-cast', (e) => {
     if (!e || e.type !== 3 || !e.data || e.data.source !== 2 || (e.data.type !== 1 && e.data.type !== 7)) return;
     const b = document.createElement('div'); b.className = 'ps-burst';
     b.style.left = e.data.x + 'px'; b.style.top = e.data.y + 'px';
@@ -287,6 +291,7 @@ async def _render(log_path: Path, out_path: Path, seconds: float, speed: float =
               if e.get("type") == 5 and (e.get("data") or {}).get("tag") == "solved"]
     solved_at = round(solved[0], 2) if solved and 0 <= solved[0] <= seconds else None
     css = (HERE / "rrweb.css").read_text()
+    pointer = log.get("game") in POINTER_GAMES
     t_all = time.time()
 
     async with async_playwright() as p:
@@ -301,7 +306,7 @@ async def _render(log_path: Path, out_path: Path, seconds: float, speed: float =
         W, H = round(w * scale), round(h * scale)
         ctx = await browser.new_context(viewport={"width": W, "height": H}, device_scale_factor=1)
         page = await ctx.new_page()
-        await page.set_content(PAGE % (css + _cursor_css(scale)))
+        await page.set_content(PAGE % (css + _cursor_css(scale, pointer)))
         await page.add_script_tag(path=str(HERE / "rrweb.umd.min.cjs"))
 
         # the sound first, all at once: it does not need real time
@@ -319,7 +324,7 @@ async def _render(log_path: Path, out_path: Path, seconds: float, speed: float =
           window.R.wrapper.style.transformOrigin = '0 0';
         }""" % (speed, scale), events)
         await page.evaluate("s => { window.SCALE = s; }", scale)
-        await page.evaluate(PAGE_JS, speed)
+        await page.evaluate(PAGE_JS, [speed, pointer])
         await page.evaluate("off => window.R.pause(off)", start_offset)
         await page.wait_for_timeout(int(SETTLE_S * 1000))
 
@@ -396,7 +401,7 @@ async def _render(log_path: Path, out_path: Path, seconds: float, speed: float =
         raise RuntimeError("the game could not be redrawn from its log")
     return {"frames_drawn": state["got"], "frames_written": total, "seconds": round(time.time() - t_all, 1),
             "sound_seconds": round(t_sound, 1), "sounds": snd["made"], "sounds_missing": snd["missing"],
-            "size": [w, h], "scale": round(scale, 3), "speed": speed, "lead_in": round(lead_in, 3), "solved_at": solved_at}
+            "size": [w, h], "scale": round(scale, 3), "speed": speed, "pointer": pointer, "lead_in": round(lead_in, 3), "solved_at": solved_at}
 
 
 if __name__ == "__main__":
