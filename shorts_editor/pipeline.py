@@ -226,6 +226,8 @@ class Job:
         self.set(stage="audio", progress=5, msg=f"probed: {info['duration']:.1f}s {info.get('width')}x{info.get('height')}")
         if not wav.exists():
             transcribe.extract_audio(getattr(src, "sound", src), wav, token=tok)
+        if self.meta.get("quick"):
+            return self._quick(src, info)
         self.set(stage="transcribe", progress=10, msg="transcribing")
 
         tpath = self.dir / "transcript.json"
@@ -260,6 +262,33 @@ class Job:
                      else f"solve tone again as {found}: at {when} (score {score})")
         self.trim_opening(found or game)
         self.recut(fit=True)
+        self.rerender()
+
+    # THE QUICK EDIT (a player's own take, 2026-11-26; Jake: players will not wait for the full one).
+    # No speech model and no AI: the voice's own loudness says where somebody is talking, each stretch
+    # of it stands in for a word, and the ordinary cut does the rest (silences over QUICK_MAX_GAP go,
+    # the end is the last thing said near the solve). It starts just before the first move.
+    QUICK_MAX_GAP = 2.0
+    QUICK_LEAD = 1.5
+
+    def _quick(self, src, info):
+        tok = self.token
+        t0 = time.time()
+        voice = self.dir / "voice.wav"   # the presenter's own microphone, without the game's sounds
+        transcribe.extract_audio(getattr(src, "cam", None) or getattr(src, "sound", src), voice, token=tok)
+        words = _speech_stretches(voice)
+        _write(self.dir / "transcript.json", {"words": words, "quick": True})
+        solve = self.meta.get("solve_at")
+        _write(self.dir / "solve.json", {"game": self.meta.get("game"), "at": solve, "score": 1.0 if solve is not None else 0.0})
+        p = cutlist.Params.from_dict(_read(self.dir / "params.json"))
+        p.max_gap, p.air = self.QUICK_MAX_GAP, 0.4
+        p.remove_fillers = p.drop_false_starts = False
+        fm = self.meta.get("first_move_at")
+        if fm is not None:
+            p.start_override = round(max(0.0, float(fm) - self.QUICK_LEAD), 2)
+        _write(self.dir / "params.json", p.to_dict())
+        self.set(stage="cut", progress=45, msg=f"quick cut from the voice's loudness: {len(words)} stretches of speech in {time.time() - t0:.1f}s")
+        self.recut(fit=False)
         self.rerender()
 
     def trim_opening(self, game):
@@ -431,7 +460,8 @@ class Job:
         def prog(t):
             self.set(progress=55 + int(40 * min(t / total, 1.0)))
 
-        render.render(src, cut["keep"], speed, tmp, loud, on_progress=prog, token=tok)
+        render.render(src, cut["keep"], speed, tmp, loud, on_progress=prog, token=tok,
+                      preset="veryfast" if self.meta.get("quick") else "medium")
         os.replace(tmp, out)
         # bump a version so the player cache-busts
         meta = self.meta
@@ -518,3 +548,27 @@ def list_jobs():
             out.append({"id": j.id, "meta": j.meta, "status": j.status(),
                         "cut": _read(d / "cut.json"), "has_video": (d / "out.mp4").exists()})
     return out
+
+
+def _speech_stretches(wav: Path):
+    """Where somebody is talking, from loudness alone (the quick edit): stretches over a line 20 dB under
+    the voice's own level, joined across gaps under a quarter of a second, blips under 0.15 s dropped.
+    Each comes back shaped like a transcript word, so the ordinary cut can use it."""
+    import numpy as np
+    db, dt = transcribe.frame_db(wav)
+    if not len(db):
+        return []
+    thr = max(float(np.percentile(db, 90)) - 20.0, -55.0)
+    on = db > thr
+    out, start, last = [], None, None
+    for i, v in enumerate(on):
+        if v:
+            if start is None:
+                start = i
+            elif last is not None and (i - last) * dt > 0.25:
+                out.append([start, last]); start = i
+            last = i
+    if start is not None:
+        out.append([start, last])
+    return [{"w": "~", "s": round(a * dt, 2), "e": round((b + 1) * dt, 2), "filler": False, "p": 1.0, "db": 0.0}
+            for a, b in out if (b + 1 - a) * dt >= 0.15]

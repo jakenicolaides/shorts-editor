@@ -102,7 +102,8 @@ def video_maxrate_kbps(duration_s: float) -> int:
     return int(max(total_kbps - AUDIO_KBPS, 600))
 
 
-def render(src: Path, keep, speed, out: Path, loud: dict, crf: int = 18, on_progress=None, token: Token = None) -> Path:
+def render(src: Path, keep, speed, out: Path, loud: dict, crf: int = 18, on_progress=None, token: Token = None,
+           preset: str = "medium") -> Path:
     duration = sum(e - s_ for s_, e in keep) / max(speed, 0.01)
     maxrate = video_maxrate_kbps(duration)
     tracks = _is_tracks(src)
@@ -110,7 +111,7 @@ def render(src: Path, keep, speed, out: Path, loud: dict, crf: int = 18, on_prog
            *(src.inputs() if tracks else ["-i", str(src)]),
            "-filter_complex", _graph(keep, speed, loud, video=True, tracks=tracks),
            "-map", "[vout]", "-map", "[aout]",
-           "-c:v", "libx264", "-preset", "medium", "-crf", str(crf), "-profile:v", "high",
+           "-c:v", "libx264", "-preset", preset, "-crf", str(crf), "-profile:v", "high",
            "-level", "4.2", "-pix_fmt", "yuv420p", "-movflags", "+faststart",
            # CRF quality up to a ceiling: the VBV cap is what keeps the file under SHARE_LIMIT.
            "-maxrate", f"{maxrate}k", "-bufsize", f"{maxrate * 2}k",

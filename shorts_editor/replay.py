@@ -335,6 +335,12 @@ async def _render(log_path: Path, out_path: Path, seconds: float, speed: float =
     solved = [(e["timestamp"] - cam0) / 1000.0 for e in events
               if e.get("type") == 5 and (e.get("data") or {}).get("tag") == "solved"]
     solved_at = round(solved[0], 2) if solved and 0 <= solved[0] <= seconds else None
+    # the player's first move after the camera started: a tap, a click, a typed letter or a key sound,
+    # which is where a player's quick cut starts (pipeline.py, quick)
+    moves = [(e["timestamp"] - cam0) / 1000.0 for e in events
+             if e["timestamp"] >= cam0 and ((e.get("type") == 3 and (e.get("data") or {}).get("source") in (2, 5, 6))
+                                            or (e.get("type") == 5 and (e.get("data") or {}).get("tag") == "sound"))]
+    first_move_at = round(moves[0], 2) if moves else None
     css = (HERE / "rrweb.css").read_text()
     hide = [sel + " { display: none !important; }" for sel in
             [".ps-rec-ui", ".app-footer"] + (PLAYER_HIDE.get(log.get("game") or "", []) if player else [])]
@@ -462,7 +468,7 @@ async def _render(log_path: Path, out_path: Path, seconds: float, speed: float =
         raise RuntimeError("the game could not be redrawn from its log")
     return {"frames_drawn": state["got"], "frames_written": total, "seconds": round(time.time() - t_all, 1),
             "sound_seconds": round(t_sound, 1), "sounds": snd["made"], "sounds_missing": snd["missing"],
-            "size": [w, h], "scale": round(scale, 3), "speed": speed, "pointer": pointer, "refused": refused[:10], "lead_in": round(lead_in, 3), "solved_at": solved_at}
+            "size": [w, h], "scale": round(scale, 3), "speed": speed, "pointer": pointer, "refused": refused[:10], "lead_in": round(lead_in, 3), "solved_at": solved_at, "first_move_at": first_move_at}
 
 
 if __name__ == "__main__":

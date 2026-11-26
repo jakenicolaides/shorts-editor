@@ -16,6 +16,7 @@ Prints one line of JSON: the job id, its folder, how it ended and how long each
 step took. Exits 1 if the edit failed.
 """
 import json
+import os
 import shutil
 import sys
 import tempfile
@@ -41,6 +42,10 @@ def run(game_track: Path, cam_track: Path, game: str, date: str = None, track: s
         puzzle = {"date": date, "track": track} if date else {}
         job = pipeline.Job.create_from_tracks(g, c, game, puzzle, offset_ms, title,
                                               solve_at=(replayed or {}).get("solved_at"))
+    # A PLAYER'S OWN TAKE (REPLAY_PROFILE=player) gets the QUICK edit (pipeline.py): no speech model and
+    # no AI, a cut from the voice's own loudness instead. Jake: they will not wait for the full one.
+    if os.environ.get("REPLAY_PROFILE") == "player":
+        job._write_meta({**job.meta, "quick": True, "first_move_at": (replayed or {}).get("first_move_at")})
     t0 = time.time()
     job.run()
     st = job.status()
