@@ -13,6 +13,7 @@ The phone cannot tell the difference.
 Only takes named selfrec-*: presenters' takes always go to the function.
 """
 import json
+import re
 import shutil
 import threading
 import sys
@@ -29,7 +30,7 @@ import boto3  # noqa: E402
 
 os.environ["REPLAY_PROFILE"] = "player"   # a player's own video (replay.py: what it leaves out of the redraw)
 
-from shorts_editor import worker  # noqa: E402
+from shorts_editor import camjoin, worker  # noqa: E402
 from shorts_editor.lambda_handler import BUCKET, KEEP  # noqa: E402
 
 PREFIX = "takes/selfrec-"
@@ -64,12 +65,18 @@ def edit(s3, take: str, req_key: str):
     tmp = WORK / take
     shutil.rmtree(tmp, ignore_errors=True)
     tmp.mkdir(parents=True)
-    found = {}
+    found, cams = {}, {}
     for o in s3.list_objects_v2(Bucket=BUCKET, Prefix=base).get("Contents", []):
         name = o["Key"][len(base):]
-        if name in ("game.json", "cam.mp4", "cam.webm"):
+        m = re.fullmatch(r"cam(?:-(\d+))?\.(mp4|webm)", name)
+        if name == "game.json" or m:
             s3.download_file(BUCKET, o["Key"], str(tmp / name))
-            found["game" if name == "game.json" else "cam"] = tmp / name
+            if m:
+                cams[int(m.group(1) or 0)] = tmp / name
+            else:
+                found["game"] = tmp / name
+    if 0 in cams:
+        found["cam"] = cams[0]
     t0 = time.time()
     res = {"stage": "failed", "error": None, "run": ev.get("run")}
     # The edit's progress, sent on to storage every two seconds for the phone's bar (progress.py), and a
@@ -92,6 +99,13 @@ def edit(s3, take: str, req_key: str):
     try:
         if set(found) != {"game", "cam"}:
             raise FileNotFoundError("the take is missing a track")
+        segs = camjoin.segments(found["game"])   # the game was reloaded while recording: one camera file per stretch
+        if segs:
+            missing = [s["seg"] for s in segs if s["seg"] not in cams]
+            if missing:
+                raise FileNotFoundError(f"the take is missing camera part {missing[0]}")
+            found["cam"] = camjoin.join([cams[s["seg"]] for s in segs], [s["start_ms"] for s in segs], tmp / "cam-joined.mp4")
+            print(f"  joined {len(segs)} camera files", flush=True)
         r = worker.run(found["game"], found["cam"], ev.get("game") or "twixtle", ev.get("date"),
                        ev.get("track") or "daily", 0.0, ev.get("title"))
         job = Path(r["dir"])
