@@ -109,8 +109,14 @@ def render(src: Path, keep, speed, out: Path, loud: dict, crf: int = 18, on_prog
     tracks = _is_tracks(src)
     cmd = ["ffmpeg", "-y", "-hide_banner", "-nostats", "-progress", "pipe:1",
            *(src.inputs() if tracks else ["-i", str(src)]),
-           "-filter_complex", _graph(keep, speed, loud, video=True, tracks=tracks),
-           "-map", "[vout]", "-map", "[aout]",
+           # A phone's camera records FULL range (0-255, yuvj420p) and that came through to the video, which
+           # most players and apps then stretch a second time as though it were the usual 16-235: harsh
+           # contrast, crushed shadows, next to the viewfinder (Jake, 2026-11-26). The finished video is
+           # always the standard range and colours, and says so.
+           "-filter_complex", _graph(keep, speed, loud, video=True, tracks=tracks)
+           + ";[vout]scale=out_range=tv:out_color_matrix=bt709,format=yuv420p[vstd]",
+           "-map", "[vstd]", "-map", "[aout]",
+           "-color_range", "tv", "-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709",
            "-c:v", "libx264", "-preset", preset, "-crf", str(crf), "-profile:v", "high",
            "-level", "4.2", "-pix_fmt", "yuv420p", "-movflags", "+faststart",
            # CRF quality up to a ceiling: the VBV cap is what keeps the file under SHARE_LIMIT.
