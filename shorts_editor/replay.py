@@ -367,7 +367,9 @@ async def _render(log_path: Path, out_path: Path, seconds: float, speed: float =
                                               UNSAFE_replayCanvas: true,   /* Vowelsweeper's confetti is a canvas, logged as pictures */
                                               /* a player's own recording controls (the game's record mode) are in the log, being on the
                                                  page; the video is the game, so they are hidden in the redraw */
-                                              insertStyleRules: ['.ps-rec-ui { display: none !important; }'],
+                                              /* and the site footer, which a presenter's recording never shows (Twixtle's
+                                                 body.recording hides it) and a player's own does, on screen */
+                                              insertStyleRules: ['.ps-rec-ui { display: none !important; }', '.app-footer { display: none !important; }'],
                                               skipInactive: false, triggerFocus: false, speed: %s });
           window.R.wrapper.style.transform = 'scale(%s)';
           window.R.wrapper.style.transformOrigin = '0 0';
