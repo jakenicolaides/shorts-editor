@@ -368,19 +368,26 @@ async def _render(log_path: Path, out_path: Path, seconds: float, speed: float =
     order = sorted(slots)
     if not order:
         raise RuntimeError("the game could not be redrawn from its log: no picture was drawn")
-    lst = fdir / "frames.txt"
-    with open(lst, "w") as f:
-        for i, n in enumerate(order):
-            nxt = order[i + 1] if i + 1 < len(order) else total
-            f.write(f"file '{slots[n]}'\nduration {(nxt - n) / FPS:.6f}\n")
-        f.write(f"file '{slots[order[-1]]}'\n")
-    r = subprocess.run([
+    # exactly `total` frames, piped in order now that capture is over (the concat demuxer, tried
+    # first, came out 0.8 s short on a Twixtle take, and the editor stops at the shorter track)
+    ff = subprocess.Popen([
         "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
-        "-f", "concat", "-safe", "0", "-i", str(lst), "-i", str(wav), "-map", "0:v", "-map", "1:a",
-        "-vf", f"scale=trunc(iw/2)*2:trunc(ih/2)*2,format=yuv420p,tpad=stop_mode=clone:stop_duration={seconds:.3f}",
-        "-fps_mode", "cfr", "-r", str(FPS),
-        "-c:v", "libx264", "-preset", "veryfast", "-crf", "16",
-        "-c:a", "aac", "-b:a", "192k", "-t", f"{seconds:.3f}", str(out_path)])
+        "-f", "image2pipe", "-framerate", str(FPS), "-c:v", "mjpeg", "-i", "-",
+        "-i", str(wav), "-map", "0:v", "-map", "1:a",
+        "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2,format=yuv420p",
+        "-c:v", "libx264", "-preset", "veryfast", "-crf", "16", "-r", str(FPS),
+        "-c:a", "aac", "-b:a", "192k", "-t", f"{seconds:.3f}", str(out_path)], stdin=subprocess.PIPE)
+    cur, k = None, 0
+    try:
+        for n in range(total):
+            while k < len(order) and order[k] <= n:
+                cur = slots[order[k]].read_bytes(); k += 1
+            ff.stdin.write(cur)
+        ff.stdin.close()
+    except BrokenPipeError:
+        pass
+    r = ff
+    r.returncode = ff.wait()
     ok = r.returncode == 0
     import shutil
     shutil.rmtree(fdir, ignore_errors=True)
