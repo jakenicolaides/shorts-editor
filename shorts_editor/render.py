@@ -30,6 +30,8 @@ TARGET_LRA = 11.0
 
 
 def _atempo_chain(speed: float) -> str:
+    if not (0.25 <= speed <= 4.0):   # below 0.5 the loop below halves toward zero for ever at <= 0
+        raise ValueError(f"speed {speed} is outside 0.25 to 4")
     parts = []
     s = speed
     while s > 2.0:

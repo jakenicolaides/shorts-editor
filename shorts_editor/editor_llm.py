@@ -3,6 +3,7 @@ the cut parameters or explicit cut/keep ranges. Claude sees the transcript
 timeline, the current parameters, the current keep list, and the note, and
 returns a strictly-typed decision. It can only move the knobs below, so a note
 can never do anything outside the cut list."""
+import math
 from typing import List, Literal
 from pydantic import BaseModel, Field
 import anthropic
@@ -142,13 +143,40 @@ Reviewer's note:
     return resp.parsed_output
 
 
+# What a note may set each knob to. A presenter writes the note and the model only relays it,
+# so its numbers are as untrusted as the note: "set the speed to -1" once sent the render into
+# an endless loop (render._atempo_chain) until Lambda's 15 minutes ran out. Anything outside a
+# bound is pulled to it; anything that is not a finite number is ignored.
+BOUNDS = {
+    "max_gap": (0.3, 30.0), "air": (0.0, 3.0), "start_air": (0.0, 5.0), "end_air": (0.0, 5.0),
+    "post_solve_window": (0.0, 60.0), "protect_before": (0.0, 120.0), "min_duration": (0.0, 178.0),
+    "speed": (0.5, 2.0),
+    "start_override": (0.0, 7200.0), "end_override": (0.0, 7200.0), "solve_override": (0.0, 7200.0),
+}
+MAX_RANGES = 50
+
+
+def _finite(x) -> bool:
+    return isinstance(x, (int, float)) and math.isfinite(x)
+
+
+def _ranges(old, new) -> list:
+    out = [r for r in list(old or []) if len(r) == 2 and _finite(r[0]) and _finite(r[1])]
+    out += [[max(0.0, r.start), min(7200.0, r.end)] for r in new if _finite(r.start) and _finite(r.end)]
+    return [r for r in out if r[0] < r[1]][:MAX_RANGES]
+
+
 def apply(decision: EditDecision, params: dict) -> dict:
     p = dict(params)
     if decision.clear_overrides:
         p["keep_ranges"], p["extra_cuts"] = [], []
         p["start_override"] = p["end_override"] = p["solve_override"] = None
     for c in decision.changes:
-        p[c.name] = bool(c.value) if c.name == "remove_fillers" else float(c.value)
-    p["keep_ranges"] = list(p.get("keep_ranges") or []) + [[r.start, r.end] for r in decision.add_keep_ranges]
-    p["extra_cuts"] = list(p.get("extra_cuts") or []) + [[r.start, r.end] for r in decision.add_extra_cuts]
+        if c.name == "remove_fillers":
+            p[c.name] = bool(c.value)
+        elif _finite(c.value):
+            lo, hi = BOUNDS[c.name]
+            p[c.name] = min(hi, max(lo, float(c.value)))
+    p["keep_ranges"] = _ranges(p.get("keep_ranges"), decision.add_keep_ranges)
+    p["extra_cuts"] = _ranges(p.get("extra_cuts"), decision.add_extra_cuts)
     return p
