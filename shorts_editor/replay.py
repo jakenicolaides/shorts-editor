@@ -63,9 +63,71 @@ async ([sounds, seconds]) => {
     bufs[s.u] = null;
     try { bufs[s.u] = await ctx.decodeAudioData(await (await fetch(s.u)).arrayBuffer()); } catch (e) {}
   }
+  // Vowelsweeper's voices run through its master: a gain (s.m) and a lowpass at 7500 Hz.
+  // Its recorded stings ('el') are plain <audio> elements and bypass it, as in the game.
+  let vsMaster = null;
+  const master = (m) => {
+    if (!vsMaster) {
+      vsMaster = ctx.createGain(); vsMaster.gain.value = m == null ? 0.9 : m;
+      const cap = ctx.createBiquadFilter(); cap.type = 'lowpass'; cap.frequency.value = 7500;
+      vsMaster.connect(cap); cap.connect(ctx.destination);
+    }
+    return vsMaster;
+  };
+  const LEAD = 0.01;   // the game schedules each voice a buffer ahead (sfxAt)
+  const noise = (dur) => {
+    const len = Math.max(1, Math.floor(rate * dur)), buf = ctx.createBuffer(1, len, rate), d = buf.getChannelData(0);
+    for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / len);
+    return buf;
+  };
+  let grit = null;
+  const gritCurve = () => { if (!grit) { grit = new Float32Array(512); for (let i = 0; i < 512; i++) grit[i] = Math.tanh((i * 2 / 512 - 1) * 5); } return grit; };
+  for (const [, s] of sounds) {
+    if (s.k !== 'el' || s.u in bufs) continue;
+    bufs[s.u] = null;
+    try { bufs[s.u] = await ctx.decodeAudioData(await (await fetch(s.u)).arrayBuffer()); } catch (e) {}
+  }
   let made = 0;
   for (const [t, s] of sounds) {
-    if (s.k === 'tone') {
+    if (t < 0 || t > seconds) continue;
+    if (s.k === 'blip') {
+      const at = t + LEAD, osc = ctx.createOscillator(), g = ctx.createGain();
+      osc.type = s.type; osc.frequency.setValueAtTime(s.f0, at); osc.frequency.exponentialRampToValueAtTime(s.f1, at + s.d);
+      g.gain.setValueAtTime(0.0001, at); g.gain.exponentialRampToValueAtTime(s.p, at + 0.008); g.gain.exponentialRampToValueAtTime(0.0001, at + s.d);
+      osc.connect(g); g.connect(master(s.m)); osc.start(at); osc.stop(at + s.d + 0.02); made++;
+    } else if (s.k === 'note') {
+      const at = t + LEAD + (s.delay || 0), osc = ctx.createOscillator(), g = ctx.createGain();
+      osc.type = 'triangle'; osc.frequency.setValueAtTime(s.f, at);
+      g.gain.setValueAtTime(0.0001, at); g.gain.exponentialRampToValueAtTime(s.p, at + 0.012); g.gain.exponentialRampToValueAtTime(0.0001, at + s.d);
+      osc.connect(g); g.connect(master(s.m)); osc.start(at); osc.stop(at + s.d + 0.03); made++;
+    } else if (s.k === 'tick') {
+      const at = t + LEAD, src = ctx.createBufferSource(), lp = ctx.createBiquadFilter(), g = ctx.createGain();
+      src.buffer = noise(s.d); lp.type = 'lowpass'; lp.frequency.value = s.cut;
+      g.gain.setValueAtTime(s.np, at); g.gain.exponentialRampToValueAtTime(0.0001, at + s.d);
+      src.connect(lp); lp.connect(g); g.connect(master(s.m)); src.start(at); src.stop(at + s.d + 0.01);
+      if (s.bp) {
+        const osc = ctx.createOscillator(), og = ctx.createGain(); osc.type = 'sine';
+        osc.frequency.setValueAtTime(s.bf, at); osc.frequency.exponentialRampToValueAtTime(s.bf * 0.7, at + s.d);
+        og.gain.setValueAtTime(0.0001, at); og.gain.exponentialRampToValueAtTime(s.bp, at + 0.006); og.gain.exponentialRampToValueAtTime(0.0001, at + s.d + 0.01);
+        osc.connect(og); og.connect(master(s.m)); osc.start(at); osc.stop(at + s.d + 0.04);
+      }
+      made++;
+    } else if (s.k === 'boom') {
+      const at = t + LEAD + s.t0, osc = ctx.createOscillator(), g = ctx.createGain();
+      osc.type = 'sine'; osc.frequency.setValueAtTime(s.f0, at); osc.frequency.exponentialRampToValueAtTime(s.f0 * 0.28, at + s.d);
+      g.gain.setValueAtTime(0.0001, at); g.gain.exponentialRampToValueAtTime(s.bp, at + 0.014); g.gain.exponentialRampToValueAtTime(0.0001, at + s.d + 0.03);
+      osc.connect(g); g.connect(master(s.m)); osc.start(at); osc.stop(at + s.d + 0.05);
+      const src = ctx.createBufferSource(), sh = ctx.createWaveShaper(), lp = ctx.createBiquadFilter(), ng = ctx.createGain();
+      src.buffer = noise(s.d); sh.curve = gritCurve(); sh.oversample = '2x';
+      lp.type = 'lowpass'; lp.frequency.setValueAtTime(s.cut, at); lp.frequency.exponentialRampToValueAtTime(320, at + s.d);
+      ng.gain.setValueAtTime(s.np, at); ng.gain.exponentialRampToValueAtTime(0.0001, at + s.d);
+      src.connect(sh); sh.connect(lp); lp.connect(ng); ng.connect(master(s.m)); src.start(at); src.stop(at + s.d + 0.02); made++;
+    } else if (s.k === 'el') {
+      const b = bufs[s.u]; if (!b) continue;
+      const src = ctx.createBufferSource(), g = ctx.createGain();
+      src.buffer = b; g.gain.value = s.v == null ? 1 : s.v;
+      src.connect(g); g.connect(ctx.destination); src.start(t); made++;
+    } else if (s.k === 'tone') {
       const t0 = t + (s.delay || 0);
       if (t0 < 0 || t0 > seconds) continue;
       const osc = ctx.createOscillator(), g = ctx.createGain();
