@@ -71,6 +71,31 @@ a 4:17 take from 131s (join 51, render 80) to 78s.
   anything listens. Transcribing the microphone alone and finding the chime in the game's
   sound alone would both be cleaner than what OBS ever gave.
 
+## A game redrawn from its log (on trial, 2026-11-26, branch `game-log`, NOT shipped)
+
+A take's game track may be a LOG of the game's screen (`game.json`, gzipped rrweb events plus
+the camera's start time) instead of a film of it, for laptops too slow to film a tab and a
+camera at once. `replay.py` turns it back into the film everything else reads: rrweb's player
+in headless Chromium (Playwright), played in REAL TIME so the game's CSS animations run,
+screencast frames placed on a steady 30 fps by their draw times, drawn at 1080 wide by zooming
+the player (the screencast ignores a device scale). Sound is made again from the log's sound
+events in an OfflineAudioContext, so it is the game's own Web Audio. The game also marks the
+solve, which becomes `meta.solve_at` and replaces listening for the chime. Measured on a 34s
+Twixtle log: picture and sound within 30 ms, the solve chime 0.53 against the template (under
+the 0.55 bar, which is why the mark exists). **Played at 2x** (`SPEED`): the player's clock and
+every CSS animation run twice as fast (`Animation.setPlaybackRate`) and frame times are scaled
+back. 2x kept every animation frame; 4x and 8x lost half and a third of them (the screencast
+draws only so many frames a second), so do not raise it to save time. It adds half a take's
+length to the Lambda run (a 4 minute take, about 2 minutes). **Not yet
+tried in the Linux image or on Lambda** (the Dockerfile installs Chromium; the launch flags
+for Lambda are in `replay.py`). The redrawn film is stored as `game.mp4` beside the log so a
+note does not draw it again. **Frames are saved as they arrive and assembled after**: encoding them as they came
+blocked the handler after a long still stretch (it wrote every held frame at once) and the
+screencast's next frames were lost, which froze Vowelsweeper over two flips in Jake's first
+take. **The pointer is drawn** (Jake: it shows what the presenter means), as his arrow
+(`replay/cursor.png`), from the mouse movement the games log. **Canvas is replayed**
+(`UNSAFE_replayCanvas`): Vowelsweeper's confetti is a canvas the game logs as pictures.
+
 ## The editor on Linux (2026-11-20)
 
 **The editor runs on Linux, for the server that will edit ambassadors' takes.** The only

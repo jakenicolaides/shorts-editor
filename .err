@@ -1,0 +1,19 @@
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/private/tmp/claude-501/-Users-jakenicolaides-Documents-unseen-server-srv-www-sites-twixt-games/ca16d5b1-759a-40d6-b897-fb9ed3e1489f/scratchpad/trial/shorts-editor/shorts_editor/worker.py", line 75, in <module>
+    main(sys.argv[1:])
+    ~~~~^^^^^^^^^^^^^^
+  File "/private/tmp/claude-501/-Users-jakenicolaides-Documents-unseen-server-srv-www-sites-twixt-games/ca16d5b1-759a-40d6-b897-fb9ed3e1489f/scratchpad/trial/shorts-editor/shorts_editor/worker.py", line 68, in main
+    res = run(Path(argv[0]), Path(argv[1]), opt("--game"), opt("--date"), opt("--track", "daily"),
+              float(opt("--offset-ms", 0) or 0), opt("--title"))
+  File "/private/tmp/claude-501/-Users-jakenicolaides-Documents-unseen-server-srv-www-sites-twixt-games/ca16d5b1-759a-40d6-b897-fb9ed3e1489f/scratchpad/trial/shorts-editor/shorts_editor/worker.py", line 39, in run
+    g = Path(shutil.copy2(game_track, Path(td) / ("game" + game_track.suffix.lower())))
+             ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.13/3.13.5/Frameworks/Python.framework/Versions/3.13/lib/python3.13/shutil.py", line 468, in copy2
+    copyfile(src, dst, follow_symlinks=follow_symlinks)
+    ~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.13/3.13.5/Frameworks/Python.framework/Versions/3.13/lib/python3.13/shutil.py", line 260, in copyfile
+    with open(src, 'rb') as fsrc:
+         ~~~~^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: '/private/tmp/claude-501/-Users-jakenicolaides-Documents-unseen-server-srv-www-sites-twixt-games/ca16d5b1-759a-40d6-b897-fb9ed3e1489f/scratchpad/vs_game.json /Users/jakenicolaides/Documents/unseen_server/srv/www/sites/shorts.unseenforms.com/data/videos/takes/267231133cea0ec20382a812b380931a/cam.mp4 vowelsweeper'

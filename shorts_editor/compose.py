@@ -90,13 +90,20 @@ def mix(game: Path, cam: Path, out_wav: Path, offset_ms: float = 0.0, token: Tok
     return out_wav
 
 
+# A PICTURE THAT STOPS SHORT OF THE SOUND HOLDS ITS LAST FRAME, for up to this long. A browser
+# whose encoder falls behind saves fewer frames, and its file's picture ends before its sound:
+# Jake's take of 2026-11-26 saved 3 frames a second and its picture stopped 3.4 s before he
+# did, which cut his closing words. The take runs to the end of the sound instead.
+HOLD_S = 10.0
+
+
 def stack_filters(out: str = "st", game: str = "0:v", cam: str = "1:v") -> list:
     """The picture: the webcam over the game, as ffmpeg filters ending in [out]. The one
     statement of the layout, used by the join below and by the render (render.py)."""
     return [
         # the webcam fills its panel and is cropped to it; the game is fitted whole inside its own
-        f"[{cam}]fps={FPS},scale={W}:{CAM_H}:force_original_aspect_ratio=increase:flags=lanczos,crop={W}:{CAM_H},setsar=1[_cam]",
-        f"[{game}]fps={FPS},scale={W}:{GAME_H}:force_original_aspect_ratio=decrease:flags=lanczos,"
+        f"[{cam}]fps={FPS},tpad=stop_mode=clone:stop_duration={HOLD_S:g},scale={W}:{CAM_H}:force_original_aspect_ratio=increase:flags=lanczos,crop={W}:{CAM_H},setsar=1[_cam]",
+        f"[{game}]fps={FPS},tpad=stop_mode=clone:stop_duration={HOLD_S:g},scale={W}:{GAME_H}:force_original_aspect_ratio=decrease:flags=lanczos,"
         f"pad={W}:{GAME_H}:(ow-iw)/2:(oh-ih)/2:color={GAME_BG},setsar=1[_game]",
         f"[_cam][_game]vstack=inputs=2:shortest=1,format=yuv420p[{out}]",
     ]
@@ -134,7 +141,8 @@ class Tracks:
                 "-i", str(self.sound)]
 
     def duration(self) -> float:
-        """How long the take is: the shortest of the two pictures (as delayed) and the sound."""
+        """How long the take is: the sound, unless a picture stops more than HOLD_S before it
+        (a picture a little short holds its last frame, stack_filters)."""
         def dur(path, stream):
             r = subprocess.run(["ffprobe", "-v", "error", "-select_streams", stream, "-show_entries", "stream=duration:format=duration",
                                 "-of", "json", str(path)], capture_output=True, text=True, check=True)
@@ -142,7 +150,7 @@ class Tracks:
             j = json.loads(r.stdout)
             d = (j.get("streams") or [{}])[0].get("duration") or j["format"]["duration"]
             return float(d)
-        return min(dur(self.game, "v:0") + self.game_delay, dur(self.cam, "v:0") + self.cam_delay, dur(self.sound, "a:0"))
+        return min(dur(self.game, "v:0") + self.game_delay + HOLD_S, dur(self.cam, "v:0") + self.cam_delay + HOLD_S, dur(self.sound, "a:0"))
 
     def frame(self, t: float, out: Path, token: Token = None, width: int = 720) -> Path:
         """One frame of the finished layout at time t, for reading the puzzle off the picture."""

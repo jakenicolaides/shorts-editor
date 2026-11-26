@@ -128,7 +128,7 @@ class Job:
 
     @classmethod
     def create_from_tracks(cls, game_src: Path, cam_src: Path, game: str, puzzle: dict = None,
-                           offset_ms: float = 0.0, title: str = None) -> "Job":
+                           offset_ms: float = 0.0, title: str = None, solve_at: float = None) -> "Job":
         """A take from the recorder: the game and the webcam as two files (compose.py
         joins them when the job runs). The recorder opened a particular puzzle, so the
         game is known and is not guessed from the sound. `puzzle` is {date, track}.
@@ -147,6 +147,7 @@ class Job:
         _write(job.dir / "meta.json", {
             "name": name, "title": (title or "").strip(), "game": game, "speed": 1.0, "created": time.time(),
             "tracks": True, "offset_ms": float(offset_ms or 0), "puzzle": puzzle,
+            **({"solve_at": float(solve_at)} if solve_at is not None else {}),   # from a game's log: known, not heard
         })
         if (title or "").strip():   # named by the recorder: nothing to read off the clip
             _write(job.dir / "title.json", {"title": title.strip(), "game": game, "read": None, "match": None, "why": None, "from": "recorder"})
@@ -235,14 +236,18 @@ class Job:
         self.set(stage="solve", progress=40)
 
         game = self.meta.get("game") or "auto"
-        if game == "auto":
+        if self.meta.get("solve_at") is not None and game != "auto":   # a game's log said when it was solved
+            when, score = float(self.meta["solve_at"]), 1.0
+            self.set(msg=f"solved at {when}s, from the game's log")
+        elif game == "auto":
             game, when, score = solvetone.detect_any(wav)
         else:
             when, score = solvetone.detect(wav, game)
         tok.check()
         _write(self.dir / "solve.json", {"game": game, "at": when, "score": score})
-        self.set(msg=f"solve tone: {game} at {when} (score {score})" if when is not None
-                 else f"no solve tone found (best score {score})")
+        if self.meta.get("solve_at") is None:
+            self.set(msg=f"solve tone: {game} at {when} (score {score})" if when is not None
+                     else f"no solve tone found (best score {score})")
 
         found = self.infer_title(game, when, info["duration"])
         if found and found != game:

@@ -3,3 +3,4 @@ numpy
 scipy
 anthropic
 boto3
+playwright==1.65.2   # replay.py: a game redrawn from its log
