@@ -317,15 +317,9 @@ async def _render(log_path: Path, out_path: Path, seconds: float, speed: float =
     # have on a laptop. Pointer positions would no longer match, which is why it is not done to a
     # log already within a tenth of that size: those are the presenters' own.
     player = os.environ.get("REPLAY_PROFILE") == "player"
-    # EXPERIMENT (REPLAY_LAYOUT=fullscreen, Jake 2026-11-26): the game fills the whole video, laid out
-    # as a phone shows it (keyboard and all), and the camera is laid over the keyboard (compose.py,
-    # STACK_OVERLAY). The keyboard's place is measured once the page is drawn and handed back.
-    fullscreen = player and os.environ.get("REPLAY_LAYOUT") == "fullscreen"
     lw = (PLAYER_LAYOUT_WIDTH if player else {}).get(log.get("game") or "") or LAYOUT_WIDTH.get(log.get("game") or "")
-    if fullscreen:
-        lw = 460
     if lw:
-        lh = round(lw * (1920 / 1080 if fullscreen else GAME_PANEL[1] / GAME_PANEL[0]))
+        lh = round(lw * GAME_PANEL[1] / GAME_PANEL[0])
         if abs(w - lw) > lw * 0.1 or abs(h - lh) > lh * 0.1:
             for e in events:
                 if e.get("type") == 4 or (e.get("type") == 3 and (e.get("data") or {}).get("source") == 4):
@@ -394,13 +388,6 @@ async def _render(log_path: Path, out_path: Path, seconds: float, speed: float =
         await page.evaluate(PAGE_JS, [speed, pointer])
         await page.evaluate("off => window.R.pause(off)", start_offset)
         await page.wait_for_timeout(int(SETTLE_S * 1000))
-        overlay = None
-        if fullscreen:   # where the keyboard is, in the finished picture's pixels
-            r = await page.evaluate("""() => { const f = document.querySelector('.replayer-wrapper iframe');
-              const k = f && f.contentDocument && f.contentDocument.querySelector('.keyboard');
-              if (!k) return null; const b = k.getBoundingClientRect(); return [b.left, b.top, b.width, b.height]; }""")
-            if r and r[2] > 0 and r[3] > 0:
-                overlay = [int(round(v * scale / 2)) * 2 for v in r]
 
         # FRAMES ARE ONLY SAVED WHILE THE PLAYER RUNS, never encoded. Encoding as they arrived meant
         # that after a long still stretch the handler wrote every held frame at once (46 seconds of a
@@ -475,7 +462,7 @@ async def _render(log_path: Path, out_path: Path, seconds: float, speed: float =
         raise RuntimeError("the game could not be redrawn from its log")
     return {"frames_drawn": state["got"], "frames_written": total, "seconds": round(time.time() - t_all, 1),
             "sound_seconds": round(t_sound, 1), "sounds": snd["made"], "sounds_missing": snd["missing"],
-            "size": [w, h], "scale": round(scale, 3), "speed": speed, "pointer": pointer, "refused": refused[:10], "overlay": overlay, "lead_in": round(lead_in, 3), "solved_at": solved_at}
+            "size": [w, h], "scale": round(scale, 3), "speed": speed, "pointer": pointer, "refused": refused[:10], "lead_in": round(lead_in, 3), "solved_at": solved_at}
 
 
 if __name__ == "__main__":

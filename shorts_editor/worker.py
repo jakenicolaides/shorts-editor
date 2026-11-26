@@ -28,18 +28,12 @@ from . import pipeline
 def run(game_track: Path, cam_track: Path, game: str, date: str = None, track: str = "daily",
         offset_ms: float = 0.0, title: str = None) -> dict:
     replayed = None
-    import os
-    os.environ.pop("STACK_OVERLAY", None)   # set again below only for a full-screen experiment take
     # create_from_tracks MOVES its inputs into the job; the caller keeps its own copies
     with tempfile.TemporaryDirectory() as td:
         if game_track.suffix.lower() == ".json":
             from . import replay
             g = Path(td) / "game.mp4"
             replayed = replay.render(game_track, g, _seconds(cam_track))
-            import os
-            ov = (replayed or {}).get("overlay")   # the full-screen experiment: where the camera goes
-            if ov: os.environ["STACK_OVERLAY"] = ",".join(str(v) for v in ov)
-            else: os.environ.pop("STACK_OVERLAY", None)
             offset_ms = 0.0   # the log is laid on the camera's own clock
         else:
             g = Path(shutil.copy2(game_track, Path(td) / ("game" + game_track.suffix.lower())))
