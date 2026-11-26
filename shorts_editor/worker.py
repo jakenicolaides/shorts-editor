@@ -38,7 +38,7 @@ def run(game_track: Path, cam_track: Path, game: str, date: str = None, track: s
             replayed = replay.render(game_track, g, _seconds(cam_track))
             import os
             ov = (replayed or {}).get("overlay")   # the full-screen experiment: where the camera goes
-            if ov: os.environ["STACK_OVERLAY"] = ",".join(str(v) for v in ov)
+            if ov: os.environ["STACK_OVERLAY"] = str(ov)
             else: os.environ.pop("STACK_OVERLAY", None)
             offset_ms = 0.0   # the log is laid on the camera's own clock
         else:

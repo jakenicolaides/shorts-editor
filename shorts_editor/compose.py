@@ -102,11 +102,17 @@ def stack_filters(out: str = "st", game: str = "0:v", cam: str = "1:v") -> list:
     statement of the layout, used by the join below and by the render (render.py)."""
     ov = os.environ.get("STACK_OVERLAY")
     if ov:
-        # EXPERIMENT (replay.py, REPLAY_LAYOUT=fullscreen): the game fills the frame and the camera
-        # covers the rectangle named here (the game's keyboard), cropped to fill it, kept a little below
-        # centre, where a selfie held at arm's length has its face.
-        x, y, w, h = (int(v) for v in ov.split(","))
+        # EXPERIMENT (replay.py, REPLAY_LAYOUT=fullscreen): the game ON TOP, filling the width, and the
+        # camera in a band of this height BELOW it, cropped to fill, kept a little below centre where a
+        # selfie has its face. Upside down from the presenters' layout, and nothing overlaps.
+        ch = int(ov)
         return [
+            f"[{game}]fps={FPS},tpad=stop_mode=clone:stop_duration={HOLD_S:g},scale={W}:{H - ch}:flags=lanczos,setsar=1[_game]",
+            f"[{cam}]fps={FPS},tpad=stop_mode=clone:stop_duration={HOLD_S:g},"
+            f"scale={W}:{ch}:force_original_aspect_ratio=increase:flags=lanczos,crop={W}:{ch}:(iw-{W})/2:(ih-{ch})*0.8,setsar=1[_cam]",
+            f"[_game][_cam]vstack=inputs=2:shortest=1,format=yuv420p[{out}]",
+        ]
+    return [
             f"[{game}]fps={FPS},tpad=stop_mode=clone:stop_duration={HOLD_S:g},scale={W}:{H}:flags=lanczos,setsar=1[_game]",
             f"[{cam}]fps={FPS},tpad=stop_mode=clone:stop_duration={HOLD_S:g},"
             f"scale={w}:{h}:force_original_aspect_ratio=increase:flags=lanczos,crop={w}:{h}:(iw-{w})/2:(ih-{h})*0.8,setsar=1[_cam]",
