@@ -288,6 +288,30 @@ def load(path: Path) -> dict:
     return log
 
 
+def _control_ids(events) -> set:
+    """rrweb ids of the recording's controls (.ps-rec-ui) and everything inside them, from every
+    snapshot of the page and every node added to it."""
+    ids = set()
+
+    def walk(node, inside=False):
+        if not isinstance(node, dict):
+            return
+        cls = str((node.get("attributes") or {}).get("class") or "")
+        inside = inside or "ps-rec-ui" in cls.split()
+        if inside and node.get("id") is not None:
+            ids.add(node["id"])
+        for c in node.get("childNodes") or []:
+            walk(c, inside)
+    for e in events:
+        d = e.get("data") or {}
+        if e.get("type") == 2:
+            walk(d.get("node"))
+        elif e.get("type") == 3 and d.get("source") == 0:
+            for a in d.get("adds") or []:
+                walk(a.get("node"), a.get("parentId") in ids)
+    return ids
+
+
 def _wav(path: Path, pcm: bytes, rate=48000):
     import wave
     with wave.open(str(path), "wb") as w:
@@ -337,8 +361,12 @@ async def _render(log_path: Path, out_path: Path, seconds: float, speed: float =
     solved_at = round(solved[0], 2) if solved and 0 <= solved[0] <= seconds else None
     # the player's first move after the camera started: a tap, a click, a typed letter or a key sound,
     # which is where a player's quick cut starts (pipeline.py, quick)
+    # A tap on the recording's own controls (Stop, above all) is not a move: a take with no move before
+    # Stop otherwise started its cut at the Stop tap and came out a second long (Jake, 2026-11-26).
+    controls = _control_ids(events)
     moves = [(e["timestamp"] - cam0) / 1000.0 for e in events
-             if e["timestamp"] >= cam0 and ((e.get("type") == 3 and (e.get("data") or {}).get("source") in (2, 5, 6))
+             if e["timestamp"] >= cam0 and ((e.get("type") == 3 and (e.get("data") or {}).get("source") in (2, 5, 6)
+                                             and (e.get("data") or {}).get("id") not in controls)
                                             or (e.get("type") == 5 and (e.get("data") or {}).get("tag") == "sound"))]
     first_move_at = round(moves[0], 2) if moves else None
     css = (HERE / "rrweb.css").read_text()
