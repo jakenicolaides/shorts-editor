@@ -318,6 +318,8 @@ async def _render(log_path: Path, out_path: Path, seconds: float, speed: float =
     # log already within a tenth of that size: those are the presenters' own.
     player = os.environ.get("REPLAY_PROFILE") == "player"
     lw = (PLAYER_LAYOUT_WIDTH if player else {}).get(log.get("game") or "") or LAYOUT_WIDTH.get(log.get("game") or "")
+    if player and os.environ.get("REPLAY_NO_KEYBOARD") == "1" and log.get("game") == "twixtle":
+        lw = 460   # the experiment without a keyboard: the board at its own column width, filling the panel
     if lw:
         lh = round(lw * GAME_PANEL[1] / GAME_PANEL[0])
         if abs(w - lw) > lw * 0.1 or abs(h - lh) > lh * 0.1:
