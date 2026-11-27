@@ -18,6 +18,7 @@ A take that is short enough already is not sped up at all.
 """
 import json
 import subprocess
+import time
 from pathlib import Path
 
 from . import render, transcribe
@@ -144,8 +145,10 @@ def make_video(src, segs, card_png: Path, out: Path, preset="veryfast", loud: di
         g.append(f"{asrc}atrim=start={a:.3f}:end={b:.3f},asetpts=PTS-STARTPTS,{_atempo(sp)}[a{i}]")
     g.append("".join(f"[v{i}][a{i}]" for i in range(n)) + f"concat=n={n}:v=1:a=1[vc][ac]")
     g.append(f"[vc]fps=30,tpad=stop_mode=clone:stop_duration={CARD_S}[vh]")
-    g.append(f"[{card_in}:v]format=rgba,fade=in:st={body:.3f}:d=0.35:alpha=1[card]")
-    g.append(f"[vh][card]overlay=0:0:enable='gte(t,{body:.3f})',scale=out_range=tv:out_color_matrix=bt709,format=yuv420p[vout]")
+    # The card is only CARD_S long and starts at the hold: it used to be a looped still the length of the whole
+    # video, decoded and faded on every frame only to be hidden, which was a fifth of the finals' CPU.
+    g.append(f"[{card_in}:v]format=rgba,fade=in:st=0:d=0.35:alpha=1,setpts=PTS+{body:.3f}/TB[card]")
+    g.append(f"[vh][card]overlay=0:0:eof_action=repeat,scale=out_range=tv:out_color_matrix=bt709,format=yuv420p[vout]")
     ln = ""
     if loud:
         ln = (f"loudnorm=I={render.TARGET_I}:TP={render.TARGET_TP}:LRA={render.TARGET_LRA}"
@@ -156,7 +159,7 @@ def make_video(src, segs, card_png: Path, out: Path, preset="veryfast", loud: di
     maxrate = render.video_maxrate_kbps(total)
     ins = src.inputs() if tracks else ["-i", str(src)]
     cmd = ["ffmpeg", "-y", "-hide_banner", "-v", "error", *ins,
-           "-loop", "1", "-t", f"{total:.3f}", "-i", str(card_png),
+           "-loop", "1", "-framerate", "30", "-t", f"{CARD_S}", "-i", str(card_png),
            "-filter_complex", ";".join(g), "-map", "[vout]", "-map", "[aout]", "-t", f"{total:.3f}",
            "-color_range", "tv", "-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709",
            "-c:v", "libx264", "-preset", preset, "-crf", "18", "-profile:v", "high", "-level", "4.2",
@@ -219,7 +222,7 @@ def card(out: Path, date: str = None, solve_ms=None, seal: str = None):
             pass
     time_html = ""
     if solve_ms:
-        s = int(round(float(solve_ms) / 1000))
+        s = int(float(solve_ms) // 1000)   # whole seconds, as the game shows it (106.5s reads 1:46 there)
         # in the seal's colours when the solve earned one (Jake, 2026-11-27), the game's green when it did not
         look = f' style="background:{SEALS[seal][1]};color:{SEALS[seal][2]};border:5px solid {SEALS[seal][3]}"' if seal in SEALS else ""
         time_html = f'<div class="time"{look}>Solved in {s // 60}:{s % 60:02d}</div>'
@@ -281,14 +284,18 @@ def make(job_dir: Path, replayed: dict, date: str = None, tracks=None, seal: str
     tmp = job_dir / "out.card.mp4"
     # the two at once: each is one ffmpeg, and x264 alone does not fill this machine's cores
     from concurrent.futures import ThreadPoolExecutor
+    # The finals are most of a player's wait (Lambda, 2026-11-27: 70s of 126s), and on Lambda every core is busy,
+    # so their CPU is the cost. A faster x264 preset saved a sixth of it for files 1.6-2.4x the size: not taken.
+    t_enc = time.time()
     with ThreadPoolExecutor(2) as pool:
         fs = pool.submit(make_video, src, sseg, png, job_dir / "out-story.mp4", "veryfast", loud)
         ff = pool.submit(make_video, src, shseg, png, tmp, "veryfast", loud)
         story_len, full_len = fs.result(), ff.result()
+    t_enc = round(time.time() - t_enc, 1)
     progress.report("story", 0.97)
     tmp.replace(full)
     info = {"story_s": story_len, "speed": speed, "pieces": len(segs), "full_s": full_len, "whole_s": round(duration, 2), "short_pieces": len(short),
             "kept_s": round(sum(b - a for a, b, _ in segs), 2), "moves": len(moves), "solve_ms": (replayed or {}).get("solve_ms"),
-            "from": "tracks" if tracks is not None else "whole"}
+            "from": "tracks" if tracks is not None else "whole", "encode_s": t_enc}
     (job_dir / "story.json").write_text(json.dumps(info))
     return info
