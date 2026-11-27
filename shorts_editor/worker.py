@@ -46,18 +46,26 @@ def run(game_track: Path, cam_track: Path, game: str, date: str = None, track: s
     # what they recorded, pauses and all), less only `cuts`, the frozen gaps where the game was reloaded
     # (camjoin.py). No speech model and no AI, so it is quick too (pipeline.py, _quick).
     if os.environ.get("REPLAY_PROFILE") == "player":
-        job._write_meta({**job.meta, "quick": True, "whole": True, "cuts": cuts or [],
+        job._write_meta({**job.meta, "quick": True, "whole": True, "defer_render": True, "cuts": cuts or [],
                          "first_move_at": (replayed or {}).get("first_move_at")})
     t0 = time.time()
     job.run()
     story = None
-    if os.environ.get("REPLAY_PROFILE") == "player" and job.status().get("stage") == "review":
-        # the 30 second story beside the whole video, and the end card on both (story.py)
+    if os.environ.get("REPLAY_PROFILE") == "player" and job.status().get("stage") == "cut":
+        # the 30 second story and the short-form video, both straight from the take's tracks, and the end card on
+        # both (story.py). If that fails: the take rendered whole as it used to be, and the two made from that; and
+        # if that fails too, the whole one alone, so a player gets a video rather than nothing.
         from . import story as story_mod
         try:
-            story = story_mod.make(job.dir, replayed, date)
-        except Exception as e:   # the whole video is still there: a player gets that rather than nothing
-            story = {"error": str(e)[:300]}
+            story = story_mod.make(job.dir, replayed, date, tracks=job.tracks())
+            job.set(stage="review", progress=100, msg=f"made the story and the short-form video: {story}")
+        except Exception as e:
+            first = str(e)[:300]
+            job.rerender()
+            try:
+                story = {**story_mod.make(job.dir, replayed, date), "tracks_failed": first}
+            except Exception as e2:
+                story = {"error": str(e2)[:300], "tracks_failed": first}
     st = job.status()
     cut = pipeline._read(job.dir / "cut.json") or {}
     return {

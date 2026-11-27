@@ -378,7 +378,29 @@ async def _render(log_path: Path, out_path: Path, seconds: float, speed: float =
     pointer = log.get("game") in POINTER_GAMES
     t_all = time.time()
 
-    async with async_playwright() as p:
+    # THE REDRAW IS SPLIT ACROSS BROWSERS (2026-11-27, Jake: speed up the player's edit). It plays in real time
+    # (at `speed`), so one browser takes half the take's length; REPLAY_PARALLEL browsers each draw their own stretch
+    # at once, each fast-forwarded to where its stretch starts (rrweb rebuilds the page as it was there). A CSS
+    # animation running across a join restarts there, which on a game board is a twitch nobody sees. 1 is the old
+    # way, and stays the default: Lambda has the memory for one Chromium, not three.
+    import tempfile
+    fdir = Path(tempfile.mkdtemp(prefix="replay-", dir=str(out_path.parent)))
+    parts = max(1, int(os.environ.get("REPLAY_PARALLEL") or 1))
+    span = max(0.0, seconds - lead_in)
+    if span < 20 * parts:            # a stretch under 20s is not worth a browser of its own
+        parts = max(1, int(span // 20) or 1)
+    bounds = [lead_in + span * i / parts for i in range(parts + 1)]
+    refused, state, snd = [], {"got": 0}, {}
+    wav = out_path.with_suffix(".wav")
+    t_sound = 0.0
+    from . import progress
+    t_play = time.time()
+    longest = (span / parts) / speed + 0.5
+
+    async def draw(p, k):
+        """Stretch k of the video, [bounds[k], bounds[k+1]): its frames as (video seconds, path)."""
+        nonlocal t_sound
+        va, vb = bounds[k], bounds[k + 1]
         args = ["--disable-web-security", "--no-sandbox", "--disable-dev-shm-usage", "--hide-scrollbars",
                 "--force-color-profile=srgb", "--autoplay-policy=no-user-gesture-required"]
         if os.environ.get("AWS_LAMBDA_FUNCTION_NAME"):   # Lambda: no /dev/shm, no zygote, one process, home in /tmp
@@ -389,7 +411,6 @@ async def _render(log_path: Path, out_path: Path, seconds: float, speed: float =
         # player zoomed, so text is drawn sharp at 1080 (the screencast ignores a device scale)
         W, H = round(w * scale), round(h * scale)
         ctx = await browser.new_context(viewport={"width": W, "height": H}, device_scale_factor=1)
-        refused = []
 
         async def guard(route):
             if _allowed(route.request.url):
@@ -402,12 +423,11 @@ async def _render(log_path: Path, out_path: Path, seconds: float, speed: float =
         await page.set_content(PAGE % (css + _cursor_css(scale, pointer)))
         await page.add_script_tag(path=str(HERE / "rrweb.umd.min.cjs"))
 
-        # the sound first, all at once: it does not need real time
-        t_sound = time.time()
-        snd = await page.evaluate(SOUND_JS, [sounds, seconds])
-        wav = out_path.with_suffix(".wav")
-        _wav(wav, base64.b64decode(snd["pcm"]))
-        t_sound = time.time() - t_sound
+        if k == 0:   # the sound, once, all at once: it does not need real time
+            t0s = time.time()
+            snd.update(await page.evaluate(SOUND_JS, [sounds, seconds]))
+            _wav(wav, base64.b64decode(snd["pcm"]))
+            t_sound = time.time() - t0s
 
         await page.evaluate("""(ev) => {
           window.R = new rrweb.Replayer(ev, { root: document.body, mouseTail: false, showWarning: false,
@@ -423,7 +443,8 @@ async def _render(log_path: Path, out_path: Path, seconds: float, speed: float =
         }""" % (json.dumps(hide), speed, scale), events)
         await page.evaluate("s => { window.SCALE = s; }", scale)
         await page.evaluate(PAGE_JS, [speed, pointer])
-        await page.evaluate("off => window.R.pause(off)", start_offset)
+        off = int(start_offset + (va - lead_in) * 1000)   # where in the log this stretch starts
+        await page.evaluate("off => window.R.pause(off)", off)
         await page.wait_for_timeout(int(SETTLE_S * 1000))
 
         # FRAMES ARE ONLY SAVED WHILE THE PLAYER RUNS, never encoded. Encoding as they arrived meant
@@ -431,21 +452,19 @@ async def _render(log_path: Path, out_path: Path, seconds: float, speed: float =
         # Vowelsweeper take is 1,380 of them) and the screencast's next frames were dropped meanwhile:
         # the double taps that followed never appeared (Jake's first take, 2026-11-26). So each frame
         # goes to a file with its time, and ffmpeg lays them on a steady 30 a second at the end.
-        import tempfile
-        fdir = Path(tempfile.mkdtemp(prefix="replay-", dir=str(out_path.parent)))
-        shots = []                      # (video seconds, path); the still before play stands at 0
-        state = {"t0": None, "got": 0}
+        shots, st = [], {"t0": None}
         cdp = await ctx.new_cdp_session(page)
 
         def on_frame(params):
             asyncio.ensure_future(cdp.send("Page.screencastFrameAck", {"sessionId": params["sessionId"]}))
             ts = params["metadata"]["timestamp"]
-            path = fdir / f"{state['got']:06d}.jpg"
-            path.write_bytes(base64.b64decode(params["data"]))
+            path = fdir / f"{k:02d}-{state['got']:06d}.jpg"
             state["got"] += 1
-            at = 0.0 if state["t0"] is None else (ts - state["t0"]) * speed + lead_in
-            if state["t0"] is None and shots:
-                shots[-1] = (0.0, path)   # only the latest still before play counts
+            path.write_bytes(base64.b64decode(params["data"]))
+            # stretch 0 starts the video, so its still stands at 0 (the lead-in holds it); the others at their start
+            at = (0.0 if k == 0 else va) if st["t0"] is None else (ts - st["t0"]) * speed + va
+            if st["t0"] is None and shots:
+                shots[-1] = (shots[-1][0], path)   # only the latest still before play counts
             else:
                 shots.append((at, path))
 
@@ -453,20 +472,25 @@ async def _render(log_path: Path, out_path: Path, seconds: float, speed: float =
         await cdp.send("Page.startScreencast", {"format": "jpeg", "quality": 92, "everyNthFrame": 1,
                                                   "maxWidth": W, "maxHeight": H})
         await page.wait_for_timeout(300)                     # the paused still arrives
-        # second 0 of the video is when the player starts, less the lead-in where the log had not begun
         # faster than real time: the player's clock AND every CSS animation in the page run at `speed`,
         # and a frame drawn s seconds after play stands for s * speed seconds of the game
         await cdp.send("Animation.enable")
         await cdp.send("Animation.setPlaybackRate", {"playbackRate": speed})
-        state["t0"] = await page.evaluate("() => { window.R.play(%d); return (performance.timeOrigin + performance.now()) / 1000; }" % start_offset)
-        from . import progress
-        wait_s = (seconds - lead_in) / speed + 0.5
-        t_play = time.time()
-        while time.time() - t_play < wait_s:   # waited in steps, so a player's phone can show how far it has got
-            await page.wait_for_timeout(int(min(1.0, wait_s - (time.time() - t_play)) * 1000) + 1)
-            progress.report("draw", 0.65 * min(1.0, (time.time() - t_play) / wait_s))
+        st["t0"] = await page.evaluate("() => { window.R.play(%d); return (performance.timeOrigin + performance.now()) / 1000; }" % off)
+        wait_s = (vb - va) / speed + 0.5
+        t_go = time.time()
+        while time.time() - t_go < wait_s:   # waited in steps, so a player's phone can show how far it has got
+            await page.wait_for_timeout(int(min(1.0, wait_s - (time.time() - t_go)) * 1000) + 1)
+            if k == 0:
+                progress.report("draw", 0.65 * min(1.0, (time.time() - t_play) / (longest + SETTLE_S)))
         await cdp.send("Page.stopScreencast")
         await browser.close()
+        last = k == parts - 1
+        return [(at, path) for at, path in shots if last or at < vb]
+
+    async with async_playwright() as p:
+        drawn = await asyncio.gather(*(draw(p, k) for k in range(parts)))
+    shots = [x for d in drawn for x in d]
 
     # one frame per 30th of a second, each slot showing the newest frame drawn by then
     total = int(round(seconds * FPS))
@@ -483,7 +507,7 @@ async def _render(log_path: Path, out_path: Path, seconds: float, speed: float =
         "-f", "image2pipe", "-framerate", str(FPS), "-c:v", "mjpeg", "-i", "-",
         "-i", str(wav), "-map", "0:v", "-map", "1:a",
         "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2,format=yuv420p",
-        "-c:v", "libx264", "-preset", "veryfast", "-crf", "16", "-r", str(FPS),
+        "-c:v", "libx264", "-preset", "ultrafast" if player else "veryfast", "-crf", "16", "-r", str(FPS),   # a player's is re-encoded twice after: speed over size
         "-c:a", "aac", "-b:a", "192k", "-t", f"{seconds:.3f}", str(out_path)], stdin=subprocess.PIPE)
     cur, k = None, 0
     try:

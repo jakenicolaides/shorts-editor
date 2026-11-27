@@ -124,22 +124,37 @@ def _atempo(speed):
     return ",".join(parts)
 
 
-def make_video(src: Path, segs, card_png: Path, out: Path, preset="veryfast"):
-    """The pieces of src at their speeds, one after another, then the card over the last frame held still."""
+def make_video(src, segs, card_png: Path, out: Path, preset="veryfast", loud: dict = None):
+    """The pieces of src at their speeds, one after another, then the card over the last frame held still.
+    src is a finished file, or the take's own tracks (compose.Tracks), stacked here in the same pass so the
+    take is never encoded in between. loud: the take's measured loudness, applied (render.py's two-pass)."""
+    tracks = hasattr(src, "inputs")
     body = sum((b - a) / sp for a, b, sp in segs)
-    g = []
-    for i, (a, b, sp) in enumerate(segs):
-        g.append(f"[0:v]trim=start={a:.3f}:end={b:.3f},setpts=(PTS-STARTPTS)/{sp:.5f}[v{i}]")
-        g.append(f"[0:a]atrim=start={a:.3f}:end={b:.3f},asetpts=PTS-STARTPTS,{_atempo(sp)}[a{i}]")
     n = len(segs)
+    g = []
+    if tracks:
+        from .compose import stack_filters
+        g += stack_filters("st")
+        g.append("[st]split=" + str(n) + "".join(f"[s{i}]" for i in range(n)))
+    asrc, card_in = ("[2:a]", 3) if tracks else ("[0:a]", 1)
+    for i, (a, b, sp) in enumerate(segs):
+        vsrc = f"[s{i}]" if tracks else "[0:v]"
+        g.append(f"{vsrc}trim=start={a:.3f}:end={b:.3f},setpts=(PTS-STARTPTS)/{sp:.5f}[v{i}]")
+        g.append(f"{asrc}atrim=start={a:.3f}:end={b:.3f},asetpts=PTS-STARTPTS,{_atempo(sp)}[a{i}]")
     g.append("".join(f"[v{i}][a{i}]" for i in range(n)) + f"concat=n={n}:v=1:a=1[vc][ac]")
     g.append(f"[vc]fps=30,tpad=stop_mode=clone:stop_duration={CARD_S}[vh]")
-    g.append(f"[1:v]format=rgba,fade=in:st={body:.3f}:d=0.35:alpha=1[card]")
+    g.append(f"[{card_in}:v]format=rgba,fade=in:st={body:.3f}:d=0.35:alpha=1[card]")
     g.append(f"[vh][card]overlay=0:0:enable='gte(t,{body:.3f})',scale=out_range=tv:out_color_matrix=bt709,format=yuv420p[vout]")
-    g.append(f"[ac]apad=pad_dur={CARD_S}[aout]")
+    ln = ""
+    if loud:
+        ln = (f"loudnorm=I={render.TARGET_I}:TP={render.TARGET_TP}:LRA={render.TARGET_LRA}"
+              f":measured_I={loud['input_i']}:measured_TP={loud['input_tp']}:measured_LRA={loud['input_lra']}"
+              f":measured_thresh={loud['input_thresh']}:offset={loud['target_offset']}:linear=true,aresample=48000,")
+    g.append(f"[ac]{ln}apad=pad_dur={CARD_S}[aout]")
     total = body + CARD_S
     maxrate = render.video_maxrate_kbps(total)
-    cmd = ["ffmpeg", "-y", "-hide_banner", "-v", "error", "-i", str(src),
+    ins = src.inputs() if tracks else ["-i", str(src)]
+    cmd = ["ffmpeg", "-y", "-hide_banner", "-v", "error", *ins,
            "-loop", "1", "-t", f"{total:.3f}", "-i", str(card_png),
            "-filter_complex", ";".join(g), "-map", "[vout]", "-map", "[aout]", "-t", f"{total:.3f}",
            "-color_range", "tv", "-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709",
@@ -151,6 +166,21 @@ def make_video(src: Path, segs, card_png: Path, out: Path, preset="veryfast"):
     if r.returncode != 0:
         raise RuntimeError("the story could not be made:\n" + r.stderr[-2000:])
     return round(total, 2)
+
+
+def to_src(segs, keep):
+    """Pieces on the finished video's clock, back on the take's own (the camera's): the reload gaps the cut took out
+    lie between keep's stretches, so a piece that spans one becomes two."""
+    out = []
+    for a, b, sp in segs:
+        pos = 0.0
+        for s, e in keep:
+            L = e - s
+            lo, hi = max(a, pos), min(b, pos + L)
+            if hi - lo > 0.02:
+                out.append((s + lo - pos, s + hi - pos, sp))
+            pos += L
+    return out
 
 
 CARD_HTML = """<!doctype html><html><head><meta charset="utf-8"><style>
@@ -198,32 +228,52 @@ def card(out: Path, date: str = None, solve_ms=None):
     return out
 
 
-def make(job_dir: Path, replayed: dict, date: str = None) -> dict:
-    """out-story.mp4 beside out.mp4, and out.mp4 again with the card on its end. What was done, for the log."""
+def make(job_dir: Path, replayed: dict, date: str = None, tracks=None) -> dict:
+    """out-story.mp4 and out.mp4 (the short-form video), both with the card on their end. What was done, for the log.
+
+    With `tracks` (the take's own, compose.Tracks) both are made straight from them, so the take is never encoded
+    whole first: that in-between video was a fifth of a player's wait (2026-11-27). Without, from out.mp4."""
     job_dir = Path(job_dir)
     full = job_dir / "out.mp4"
     cut = json.loads((job_dir / "cut.json").read_text())
     keep = cut["keep"]
-    duration = render.probe(full)["duration"]
     png = card(job_dir / "card.png", date, (replayed or {}).get("solve_ms"))
     moves = [m for m in (to_out_time(t, keep) for t in (replayed or {}).get("moves") or []) if m is not None]
-    wav = job_dir / "story.wav"
-    transcribe.extract_audio(full, wav)
     from .pipeline import _speech_stretches   # the take's own sound: the voice and the game's, both count
-    speech = [[w["s"], w["e"]] for w in _speech_stretches(wav)]
-    wav.unlink(missing_ok=True)
+    if tracks is not None:
+        duration = sum(e - s for s, e in keep)
+        speech = []
+        for w in _speech_stretches(job_dir / "audio.wav"):   # the mix, on the take's clock, as the job already extracted it
+            a, b = to_out_time(w["s"], keep), to_out_time(w["e"], keep)
+            if a is not None or b is not None:
+                speech.append([a if a is not None else b, b if b is not None else a])
+        loud = render.measure_loudness(tracks, keep, 1.0)
+    else:
+        duration = render.probe(full)["duration"]
+        wav = job_dir / "story.wav"
+        transcribe.extract_audio(full, wav)
+        speech = [[w["s"], w["e"]] for w in _speech_stretches(wav)]
+        wav.unlink(missing_ok=True)
+        loud = None
     solve = to_out_time((replayed or {}).get("solved_at"), keep)
     first = to_out_time((replayed or {}).get("first_move_at"), keep)
     segs, speed = plan(duration, moves, speech, solve, first)
+    short = plan_short(duration, moves, speech, solve)
     from . import progress
     progress.report("story", 0.89)
-    story_len = make_video(full, segs, png, job_dir / "out-story.mp4")
-    progress.report("story", 0.94)
+    src = tracks if tracks is not None else full
+    sseg, shseg = (to_src(segs, keep), to_src(short, keep)) if tracks is not None else (segs, short)
     tmp = job_dir / "out.card.mp4"
-    short = plan_short(duration, moves, speech, solve)
-    full_len = make_video(full, short, png, tmp)
+    # the two at once: each is one ffmpeg, and x264 alone does not fill this machine's cores
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(2) as pool:
+        fs = pool.submit(make_video, src, sseg, png, job_dir / "out-story.mp4", "veryfast", loud)
+        ff = pool.submit(make_video, src, shseg, png, tmp, "veryfast", loud)
+        story_len, full_len = fs.result(), ff.result()
+    progress.report("story", 0.97)
     tmp.replace(full)
     info = {"story_s": story_len, "speed": speed, "pieces": len(segs), "full_s": full_len, "whole_s": round(duration, 2), "short_pieces": len(short),
-            "kept_s": round(sum(b - a for a, b, _ in segs), 2), "moves": len(moves), "solve_ms": (replayed or {}).get("solve_ms")}
+            "kept_s": round(sum(b - a for a, b, _ in segs), 2), "moves": len(moves), "solve_ms": (replayed or {}).get("solve_ms"),
+            "from": "tracks" if tracks is not None else "whole"}
     (job_dir / "story.json").write_text(json.dumps(info))
     return info

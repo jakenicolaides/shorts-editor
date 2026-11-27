@@ -28,7 +28,8 @@ import os  # noqa: E402
 
 import boto3  # noqa: E402
 
-os.environ["REPLAY_PROFILE"] = "player"   # a player's own video (replay.py: what it leaves out of the redraw)
+os.environ["REPLAY_PROFILE"] = "player"
+os.environ.setdefault("REPLAY_PARALLEL", "3")   # three browsers redraw the game at once on this Mac (replay.py); 63s to 27s on a 1:45 take   # a player's own video (replay.py: what it leaves out of the redraw)
 
 from shorts_editor import camjoin, worker  # noqa: E402
 from shorts_editor.lambda_handler import BUCKET, KEEP  # noqa: E402

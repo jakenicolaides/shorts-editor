@@ -295,7 +295,8 @@ class Job:
             _write(self.dir / "params.json", p.to_dict())
             self.set(stage="cut", progress=45, msg=f"kept whole, {len(p.extra_cuts)} reload gaps cut")
             self.recut(fit=False)
-            self.rerender()
+            if not self.meta.get("defer_render"):   # a player's: their two videos are made from the tracks (story.py)
+                self.rerender()
             return
         voice = self.dir / "voice.wav"   # the presenter's own microphone, without the game's sounds
         transcribe.extract_audio(getattr(src, "cam", None) or getattr(src, "sound", src), voice, token=tok)
@@ -484,7 +485,8 @@ class Job:
             self.set(progress=55 + int(40 * min(t / total, 1.0)))
 
         render.render(src, cut["keep"], speed, tmp, loud, on_progress=prog, token=tok,
-                      preset="veryfast" if self.meta.get("quick") else "medium")
+                      # a player's whole take is only the source of their two videos (story.py), so it is made as fast as x264 goes
+                      preset="ultrafast" if self.meta.get("whole") else "veryfast" if self.meta.get("quick") else "medium")
         os.replace(tmp, out)
         # bump a version so the player cache-busts
         meta = self.meta

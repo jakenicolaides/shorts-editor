@@ -111,7 +111,9 @@ solve), then the rest is sped up to fit, up to 6x, voices at their own pitch, th
 never sped up, and only when the take runs over a minute (`plan_short`). A keystroke on a computer is logged as a
 `key` mark, since with the sound off it leaves nothing else. Both end on
 a CARD (the game's wordmark, the day, the solve time the game logged), drawn by Chromium since this ffmpeg
-has no drawtext. The phone shows the story first, the short-form video beside it, and keeps both for the day.
+has no drawtext. **Made for speed (2026-11-27, 102s to 50s on a 1:45 take)**: the redraw is split across `REPLAY_PARALLEL`
+browsers (3 here, 1 on Lambda, which has memory for one), and both videos are made straight from the take's tracks
+(`story.make(tracks=...)`), never from a whole video encoded first; if that fails, the old way runs. The phone shows the story first, the short-form video beside it, and keeps both for the day.
 
 ## The editor on Linux (2026-11-20)
 
