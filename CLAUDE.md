@@ -105,7 +105,7 @@ security watch, by choice (Jake, 2026-11-26)**: it is refreshed whenever the ima
 Edited on Jake's Mac by `bin/selfrec-watch.py` (`SELFREC_EDITOR=mac` on the posting app), not Lambda: it
 must be running, with a live `aws login`, or a player's take waits on "Waiting for the editor" for ever.
 Kept WHOLE, less only the reload gaps (`camjoin.py`), and then made a second time as a **STORY of about
-30 seconds for Instagram stories** (`story.py`, 2026-11-27; its docstring has the rules): the thinking is
+up to 60 seconds for Instagram stories** (`story.py`, 2026-11-27; its docstring has the rules): the thinking is
 cut first, judged on talk OR board activity (never the voice alone, or a silent player loses the whole
 solve), then the rest is sped up to fit, up to 6x, voices at their own pitch, the last 2s at 1x. The SHORT-FORM VIDEO (the other one) gets the same quiet cut,
 never sped up, and only when the take runs over a minute (`plan_short`). A keystroke on a computer is logged as a

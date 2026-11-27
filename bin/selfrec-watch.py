@@ -109,7 +109,7 @@ def edit(s3, take: str, req_key: str):
             found["cam"], gaps = camjoin.join([cams[s["seg"]] for s in segs], [s["start_ms"] for s in segs], tmp / "cam-joined.mp4")
             print(f"  joined {len(segs)} camera files", flush=True)
         r = worker.run(found["game"], found["cam"], ev.get("game") or "twixtle", ev.get("date"),
-                       ev.get("track") or "daily", 0.0, ev.get("title"), cuts=gaps)
+                       ev.get("track") or "daily", 0.0, ev.get("title"), cuts=gaps, seal=ev.get("seal") or None)
         job = Path(r["dir"])
         # WHILE THE PROTOTYPE IS TRIED (Jake's own takes only): the take's files and the cut stay on this
         # Mac, so an edit that comes out wrong can be looked into after the phone has deleted the take.

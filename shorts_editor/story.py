@@ -1,6 +1,7 @@
-"""A player's take, made twice: the whole of it, and a STORY about 30 seconds long (Jake, 2026-11-27).
+"""A player's take, made twice: the whole of it, and a STORY of up to 60 seconds (Jake, 2026-11-27).
 
-Players post these to their Instagram stories, where 15 to 30 seconds is the length people watch. Both
+Players post these to their Instagram stories, whose one segment runs up to 60 seconds (it was cut to 30 at
+first, which sped a long solve up more than it needed). Both
 come out of the finished whole video (out.mp4), and both end on the same CARD: the Twixtle name, the day
 and the time the game showed, over the last frame held still, so every friend who watches knows what it
 is and where to find it.
@@ -21,7 +22,7 @@ from pathlib import Path
 
 from . import render, transcribe
 
-TARGET_S = 30.0      # the story's whole length, card included
+TARGET_S = 60.0      # the story's whole length, card included: an Instagram story segment is up to 60s (Jake, 2026-11-27; it was 30)
 CARD_S = 3.0         # the end card
 TAIL_S = 2.0         # up to and just past the solve, at normal speed
 AFTER_SOLVE_S = 1.0  # how long the story runs on after the solve before the card
@@ -192,13 +193,21 @@ html,body{margin:0;width:1080px;height:1920px;background:transparent}
 .name sup{font-size:44px;font-weight:600;margin:-6px 0 0 8px}
 .day{font-size:56px;font-weight:600;margin-top:40px;opacity:.85}
 .time{font-size:96px;font-weight:800;margin-top:70px;padding:22px 56px;border-radius:999px;background:#009E73}
+.seal{font-size:40px;font-weight:800;letter-spacing:12px;margin-top:44px;padding:20px 44px 18px 56px;border-radius:999px;border:5px solid}
 .site{font-size:50px;font-weight:600;margin-top:90px;opacity:.9}
 </style></head><body><div class="dim"></div><div class="box">
 <div class="name">{logo}<sup>&reg;</sup></div><div class="day">{day}</div>{time}<div class="site">twixtle.games</div>
 </div></body></html>"""
 
 
-def card(out: Path, date: str = None, solve_ms=None):
+# The seal the solve earned, in the game's own colours (index.php's .complete seals); Perfect Sharp's black gets a
+# silver edge here, being on a dark card. None, or a plain solve, draws nothing.
+SEALS = {"perfect": ("PERFECT SOLVE", "#f3dde9", "#6e3957", "#b86591"),
+         "sharp": ("SHARP SOLVE", "#dcecf7", "#0e4a6e", "#2d8cba"),
+         "perfect_sharp": ("PERFECT SHARP", "#1a1a1a", "#fafafa", "#c8c8c8")}
+
+
+def card(out: Path, date: str = None, solve_ms=None, seal: str = None):
     """The end card as a picture, drawn by the same Chromium that redraws the game (replay.py)."""
     import datetime
     day = ""
@@ -211,9 +220,15 @@ def card(out: Path, date: str = None, solve_ms=None):
     time_html = ""
     if solve_ms:
         s = int(round(float(solve_ms) / 1000))
-        time_html = f'<div class="time">Solved in {s // 60}:{s % 60:02d}</div>'
+        # in the seal's colours when the solve earned one (Jake, 2026-11-27), the game's green when it did not
+        look = f' style="background:{SEALS[seal][1]};color:{SEALS[seal][2]};border:5px solid {SEALS[seal][3]}"' if seal in SEALS else ""
+        time_html = f'<div class="time"{look}>Solved in {s // 60}:{s % 60:02d}</div>'
     logo = (Path(__file__).with_name("twixtle-wordmark.svg")).read_text()   # the game's own wordmark, as its adverts draw it
-    html = CARD_HTML.replace("{logo}", logo).replace("{day}", day).replace("{time}", time_html)
+    seal_html = ""
+    if seal in SEALS:
+        text, bg, ink, edge = SEALS[seal]
+        seal_html = f'<div class="seal" style="background:{bg};color:{ink};border-color:{edge}">{text}</div>'
+    html = CARD_HTML.replace("{logo}", logo).replace("{day}", day).replace("{time}", time_html + seal_html)
     from playwright.sync_api import sync_playwright
     with sync_playwright() as p:
         import os
@@ -228,7 +243,7 @@ def card(out: Path, date: str = None, solve_ms=None):
     return out
 
 
-def make(job_dir: Path, replayed: dict, date: str = None, tracks=None) -> dict:
+def make(job_dir: Path, replayed: dict, date: str = None, tracks=None, seal: str = None) -> dict:
     """out-story.mp4 and out.mp4 (the short-form video), both with the card on their end. What was done, for the log.
 
     With `tracks` (the take's own, compose.Tracks) both are made straight from them, so the take is never encoded
@@ -237,7 +252,7 @@ def make(job_dir: Path, replayed: dict, date: str = None, tracks=None) -> dict:
     full = job_dir / "out.mp4"
     cut = json.loads((job_dir / "cut.json").read_text())
     keep = cut["keep"]
-    png = card(job_dir / "card.png", date, (replayed or {}).get("solve_ms"))
+    png = card(job_dir / "card.png", date, (replayed or {}).get("solve_ms"), seal)
     moves = [m for m in (to_out_time(t, keep) for t in (replayed or {}).get("moves") or []) if m is not None]
     from .pipeline import _speech_stretches   # the take's own sound: the voice and the game's, both count
     if tracks is not None:
