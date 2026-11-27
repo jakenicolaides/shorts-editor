@@ -115,7 +115,7 @@ def _selfrec(event, take, run):
     if not re.fullmatch(r"selfrec-[a-f0-9]{24}", take):
         raise ValueError("not a player's take")
     saved = {k: os.environ.get(k) for k in ("REPLAY_PROFILE", "REPLAY_PARALLEL")}
-    os.environ["REPLAY_PARALLEL"] = SELFREC_PARALLEL
+    os.environ["REPLAY_PARALLEL"] = os.environ.get("SELFREC_PARALLEL") or SELFREC_PARALLEL   # the function's own setting wins, to tune without a build
     try:
         shutil.rmtree(os.environ.get("SHORTS_WORK", "/tmp/work"), ignore_errors=True)   # a warm container keeps the last job
         return selfrec.edit(boto3.client("s3"), take, {**event, "run": run}, Path("/tmp/selfrec"), cpu=_cpu())
