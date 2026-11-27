@@ -90,6 +90,8 @@ def handler(event, context=None):
     import boto3
     take = str((event or {}).get("take") or "")
     run = str((event or {}).get("run") or "")[:32]
+    if take.startswith("selfrec-") and not (event or {}).get("note"):
+        return _selfrec(event, take, run)
     try:
         res = _note(event) if (event or {}).get("note") else _edit(event)
     except Exception as e:
@@ -100,6 +102,29 @@ def handler(event, context=None):
     res["run"] = run
     _result(boto3.client("s3"), take, res)
     return res
+
+
+SELFREC_PARALLEL = "3"   # browsers redrawing a player's game at once (replay.py): a player's edit loads no speech model,
+                         # so the 10 GB has room for three; a presenter's does, and stays at one
+
+
+def _selfrec(event, take, run):
+    """A player's own take (Twixtle's record mode): shorts_editor/selfrec.py, which writes its own result.json."""
+    import boto3
+    from . import selfrec
+    if not re.fullmatch(r"selfrec-[a-f0-9]{24}", take):
+        raise ValueError("not a player's take")
+    saved = {k: os.environ.get(k) for k in ("REPLAY_PROFILE", "REPLAY_PARALLEL")}
+    os.environ["REPLAY_PARALLEL"] = SELFREC_PARALLEL
+    try:
+        shutil.rmtree(os.environ.get("SHORTS_WORK", "/tmp/work"), ignore_errors=True)   # a warm container keeps the last job
+        return selfrec.edit(boto3.client("s3"), take, {**event, "run": run}, Path("/tmp/selfrec"), cpu=_cpu())
+    finally:   # a warm container runs a presenter's take next: it must not inherit a player's settings
+        for k, v in saved.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
 
 
 def _cpu() -> str:

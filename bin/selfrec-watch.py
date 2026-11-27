@@ -29,10 +29,10 @@ import os  # noqa: E402
 import boto3  # noqa: E402
 
 os.environ["REPLAY_PROFILE"] = "player"
-os.environ.setdefault("REPLAY_PARALLEL", "3")   # three browsers redraw the game at once on this Mac (replay.py); 63s to 27s on a 1:45 take   # a player's own video (replay.py: what it leaves out of the redraw)
+os.environ.setdefault("REPLAY_PARALLEL", "3")   # three browsers redraw the game at once (replay.py); 63s to 27s on a 1:45 take
 
-from shorts_editor import camjoin, worker  # noqa: E402
-from shorts_editor.lambda_handler import BUCKET, KEEP  # noqa: E402
+from shorts_editor import selfrec  # noqa: E402
+from shorts_editor.lambda_handler import BUCKET  # noqa: E402
 
 PREFIX = "takes/selfrec-"
 WORK = ROOT / "work-selfrec"
@@ -62,92 +62,15 @@ def cancelled(s3, req_key: str) -> bool:
 
 def edit(s3, take: str, req_key: str):
     ev = json.loads(s3.get_object(Bucket=BUCKET, Key=req_key)["Body"].read())
-    base = f"takes/{take}/"
-    tmp = WORK / take
-    shutil.rmtree(tmp, ignore_errors=True)
-    tmp.mkdir(parents=True)
-    found, cams = {}, {}
-    for o in s3.list_objects_v2(Bucket=BUCKET, Prefix=base).get("Contents", []):
-        name = o["Key"][len(base):]
-        m = re.fullmatch(r"cam(?:-(\d+))?\.(mp4|webm)", name)
-        if name == "game.json" or m:
-            s3.download_file(BUCKET, o["Key"], str(tmp / name))
-            if m:
-                cams[int(m.group(1) or 0)] = tmp / name
-            else:
-                found["game"] = tmp / name
-    if 0 in cams:
-        found["cam"] = cams[0]
     t0 = time.time()
-    res = {"stage": "failed", "error": None, "run": ev.get("run")}
-    # The edit's progress, sent on to storage every two seconds for the phone's bar (progress.py), and a
-    # cancel noticed on the way: the phone's Cancel deletes the take's request note.
-    prog = tmp / "progress.json"
-    os.environ["PROGRESS_FILE"] = str(prog)
-    stop = threading.Event()
-
-    def send_progress():
-        last = None
-        while not stop.wait(2):
-            try:
-                body = prog.read_bytes()
-                if body != last:
-                    s3.put_object(Bucket=BUCKET, Key=f"{base}edit/progress.json", Body=body, ContentType="application/json")
-                    last = body
-            except Exception:
-                pass
-    threading.Thread(target=send_progress, daemon=True).start()
-    try:
-        if set(found) != {"game", "cam"}:
-            raise FileNotFoundError("the take is missing a track")
-        segs = camjoin.segments(found["game"])   # the game was reloaded while recording: one camera file per stretch
-        gaps = []
-        if segs:
-            missing = [s["seg"] for s in segs if s["seg"] not in cams]
-            if missing:
-                raise FileNotFoundError(f"the take is missing camera part {missing[0]}")
-            found["cam"], gaps = camjoin.join([cams[s["seg"]] for s in segs], [s["start_ms"] for s in segs], tmp / "cam-joined.mp4")
-            print(f"  joined {len(segs)} camera files", flush=True)
-        r = worker.run(found["game"], found["cam"], ev.get("game") or "twixtle", ev.get("date"),
-                       ev.get("track") or "daily", 0.0, ev.get("title"), cuts=gaps, seal=ev.get("seal") or None)
-        job = Path(r["dir"])
-        # WHILE THE PROTOTYPE IS TRIED (Jake's own takes only): the take's files and the cut stay on this
-        # Mac, so an edit that comes out wrong can be looked into after the phone has deleted the take.
-        keep = WORK / "kept" / take
-        shutil.rmtree(keep, ignore_errors=True)
-        shutil.copytree(tmp, keep, ignore=shutil.ignore_patterns("progress.json"))
-        for name in ("cut.json", "params.json", "meta.json", "transcript.json", "solve.json"):
-            if (job / name).exists():
-                shutil.copy(job / name, keep / name)
-        cut = json.loads((job / "cut.json").read_text()) if (job / "cut.json").exists() else {}
-        print(f"  cut {cut.get('start')}s to {cut.get('end')}s, solve {cut.get('solve_at')}, flags {cut.get('flags')}; kept in {keep}", flush=True)
-        if not cancelled(s3, req_key):
-          for name in KEEP:
-            f = job / name
-            if f.exists():
-                s3.upload_file(str(f), BUCKET, f"{base}edit/{name}",
-                               ExtraArgs={"ContentType": "video/mp4" if name.endswith(".mp4") else "application/json"})
-        shutil.rmtree(job, ignore_errors=True)
-        res.update({"stage": r["stage"], "error": r["error"], "final_duration": r["final_duration"],
-                    "flags": r["flags"], "title": r["title"]})
-        print(f"  edited in {time.time() - t0:.0f}s: {r['stage']} {r['final_duration']}s {r.get('replay', {}).get('size')}", flush=True)
-        if r.get("story"):
-            print(f"  story: {r['story']}", flush=True)
-    except Exception as e:
-        res["error"] = str(e)[:300]
-        traceback.print_exc()
-    stop.set()
-    os.environ.pop("PROGRESS_FILE", None)
-    if cancelled(s3, req_key):   # they gave up waiting: nothing of the take may be left behind
-        for o in s3.list_objects_v2(Bucket=BUCKET, Prefix=base).get("Contents", []):
-            s3.delete_object(Bucket=BUCKET, Key=o["Key"])
+    res = selfrec.edit(s3, take, ev, WORK, keep=WORK / "kept" / take, cpu="Jake's Mac")
+    if res.get("cancelled"):
         print("  cancelled by the player: everything deleted", flush=True)
-        shutil.rmtree(tmp, ignore_errors=True)
         return
-    res["seconds"] = round(time.time() - t0, 1)
-    res["cpu"] = "Jake's Mac"
-    s3.put_object(Bucket=BUCKET, Key=f"{base}edit/result.json", Body=json.dumps(res).encode(), ContentType="application/json")
-    shutil.rmtree(tmp, ignore_errors=True)
+    print(f"  edited in {time.time() - t0:.0f}s: {res.get('stage')} {res.get('final_duration')}s"
+          + (f" ERROR {res['error']}" if res.get("error") else ""), flush=True)
+    if res.get("story"):
+        print(f"  story: {res['story']}", flush=True)
 
 
 def main():
