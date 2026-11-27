@@ -55,12 +55,26 @@ def edit(s3, take: str, ev: dict, work: Path, keep: Path = None, cpu: str = None
     prog = tmp / "progress.json"
     os.environ["PROGRESS_FILE"] = str(prog)
     stop = threading.Event()
+    early = {"story": False}   # the story is in storage ahead of the rest: said in the progress the phone reads
+
+    def story_ready(path):
+        if _gone(s3, base):
+            return
+        s3.upload_file(str(path), BUCKET, f"{base}edit/out-story.mp4", ExtraArgs={"ContentType": "video/mp4"})
+        early["story"] = True
+        try:   # said at once, not at the sender's next turn
+            s3.put_object(Bucket=BUCKET, Key=f"{base}edit/progress.json", ContentType="application/json",
+                          Body=json.dumps({**json.loads(prog.read_bytes()), "story_ready": True}).encode())
+        except Exception:
+            pass
 
     def send_progress():
         last = None
         while not stop.wait(2):
             try:
                 body = prog.read_bytes()
+                if early["story"]:
+                    body = json.dumps({**json.loads(body), "story_ready": True}).encode()
                 if body != last:
                     s3.put_object(Bucket=BUCKET, Key=f"{base}edit/progress.json", Body=body, ContentType="application/json")
                     last = body
@@ -79,7 +93,7 @@ def edit(s3, take: str, ev: dict, work: Path, keep: Path = None, cpu: str = None
                 raise FileNotFoundError(f"the take is missing camera part {missing[0]}")
             found["cam"], gaps = camjoin.join([cams[s["seg"]] for s in segs], [s["start_ms"] for s in segs], tmp / "cam-joined.mp4")
         r = worker.run(found["game"], found["cam"], ev.get("game") or "twixtle", ev.get("date"),
-                       ev.get("track") or "daily", 0.0, ev.get("title"), cuts=gaps, seal=ev.get("seal") or None)
+                       ev.get("track") or "daily", 0.0, ev.get("title"), cuts=gaps, seal=ev.get("seal") or None, on_story=story_ready)
         job = Path(r["dir"])
         if keep is not None:   # the Mac only, while it is tried: the take's files and the cut, to look into later
             shutil.rmtree(keep, ignore_errors=True)
@@ -90,7 +104,7 @@ def edit(s3, take: str, ev: dict, work: Path, keep: Path = None, cpu: str = None
         if not _gone(s3, base):
             for name in KEEP:
                 f = job / name
-                if f.exists():
+                if f.exists() and not (name == "out-story.mp4" and early["story"]):
                     s3.upload_file(str(f), BUCKET, f"{base}edit/{name}",
                                    ExtraArgs={"ContentType": "video/mp4" if name.endswith(".mp4") else "application/json"})
         res.update({"stage": r["stage"], "error": r["error"], "final_duration": r["final_duration"],

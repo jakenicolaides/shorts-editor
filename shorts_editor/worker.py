@@ -27,7 +27,7 @@ from . import pipeline
 
 
 def run(game_track: Path, cam_track: Path, game: str, date: str = None, track: str = "daily",
-        offset_ms: float = 0.0, title: str = None, cuts: list = None, seal: str = None) -> dict:
+        offset_ms: float = 0.0, title: str = None, cuts: list = None, seal: str = None, on_story=None) -> dict:
     replayed = None
     # create_from_tracks MOVES its inputs into the job; the caller keeps its own copies
     with tempfile.TemporaryDirectory() as td:
@@ -57,7 +57,7 @@ def run(game_track: Path, cam_track: Path, game: str, date: str = None, track: s
         # if that fails too, the whole one alone, so a player gets a video rather than nothing.
         from . import story as story_mod
         try:
-            story = story_mod.make(job.dir, replayed, date, tracks=job.tracks(), seal=seal)
+            story = story_mod.make(job.dir, replayed, date, tracks=job.tracks(), seal=seal, on_story=on_story)
             job.set(stage="review", progress=100, msg=f"made the story and the short-form video: {story}")
         except Exception as e:
             first = str(e)[:300]

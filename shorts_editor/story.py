@@ -17,6 +17,7 @@ The story is made in two steps, in this order:
 A take that is short enough already is not sped up at all.
 """
 import json
+import shutil
 import subprocess
 import time
 from pathlib import Path
@@ -126,7 +127,7 @@ def _atempo(speed):
     return ",".join(parts)
 
 
-def make_video(src, segs, card_png: Path, out: Path, preset="veryfast", loud: dict = None):
+def make_video(src, segs, card_png: Path, out: Path, preset="veryfast", loud: dict = None, nice: bool = False):
     """The pieces of src at their speeds, one after another, then the card over the last frame held still.
     src is a finished file, or the take's own tracks (compose.Tracks), stacked here in the same pass so the
     take is never encoded in between. loud: the take's measured loudness, applied (render.py's two-pass)."""
@@ -166,6 +167,8 @@ def make_video(src, segs, card_png: Path, out: Path, preset="veryfast", loud: di
            "-pix_fmt", "yuv420p", "-movflags", "+faststart",
            "-maxrate", f"{maxrate}k", "-bufsize", f"{maxrate * 2}k", "-force_key_frames", "expr:gte(t,n_forced*2)",
            "-c:a", "aac", "-b:a", f"{render.AUDIO_KBPS}k", "-ar", "48000", str(out)]
+    if nice and shutil.which("nice"):   # behind the other video: it takes the cores that one leaves (make)
+        cmd = ["nice", "-n", "19", *cmd]
     r = subprocess.run(cmd, capture_output=True, text=True)
     if r.returncode != 0:
         raise RuntimeError("the story could not be made:\n" + r.stderr[-2000:])
@@ -246,7 +249,7 @@ def card(out: Path, date: str = None, solve_ms=None, seal: str = None):
     return out
 
 
-def make(job_dir: Path, replayed: dict, date: str = None, tracks=None, seal: str = None) -> dict:
+def make(job_dir: Path, replayed: dict, date: str = None, tracks=None, seal: str = None, on_story=None) -> dict:
     """out-story.mp4 and out.mp4 (the short-form video), both with the card on their end. What was done, for the log.
 
     With `tracks` (the take's own, compose.Tracks) both are made straight from them, so the take is never encoded
@@ -287,15 +290,27 @@ def make(job_dir: Path, replayed: dict, date: str = None, tracks=None, seal: str
     # The finals are most of a player's wait (Lambda, 2026-11-27: 70s of 126s), and on Lambda every core is busy,
     # so their CPU is the cost. A faster x264 preset saved a sixth of it for files 1.6-2.4x the size: not taken.
     t_enc = time.time()
+    # THE STORY FIRST (Jake, 2026-11-27): it is the one most will post, so it gets the cores and the short-form
+    # video runs behind it at the lowest priority, taking what is left. on_story is told the moment the story is
+    # whole, so the phone can show it while the other finishes (selfrec.py sends it on).
+    t_story = None
     with ThreadPoolExecutor(2) as pool:
         fs = pool.submit(make_video, src, sseg, png, job_dir / "out-story.mp4", "veryfast", loud)
-        ff = pool.submit(make_video, src, shseg, png, tmp, "veryfast", loud)
-        story_len, full_len = fs.result(), ff.result()
+        ff = pool.submit(make_video, src, shseg, png, tmp, "veryfast", loud, True)
+        story_len = fs.result()
+        t_story = round(time.time() - t_enc, 1)
+        progress.report("short", 0.93)
+        if on_story:
+            try:
+                on_story(job_dir / "out-story.mp4")
+            except Exception:
+                pass
+        full_len = ff.result()
     t_enc = round(time.time() - t_enc, 1)
     progress.report("story", 0.97)
     tmp.replace(full)
     info = {"story_s": story_len, "speed": speed, "pieces": len(segs), "full_s": full_len, "whole_s": round(duration, 2), "short_pieces": len(short),
             "kept_s": round(sum(b - a for a, b, _ in segs), 2), "moves": len(moves), "solve_ms": (replayed or {}).get("solve_ms"),
-            "from": "tracks" if tracks is not None else "whole", "encode_s": t_enc}
+            "from": "tracks" if tracks is not None else "whole", "encode_s": t_enc, "story_at_s": t_story}
     (job_dir / "story.json").write_text(json.dumps(info))
     return info
