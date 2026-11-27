@@ -58,19 +58,16 @@ def to_out_time(t, keep):
     return None
 
 
-def plan(duration, moves, speech, solve_at, first_move_at):
-    """[(start, end, speed), ...] on the finished video's clock, and the speed chosen."""
-    start = max(0.0, (first_move_at if first_move_at is not None else 0.0) - LEAD_S)
-    end = min(duration, solve_at + AFTER_SOLVE_S) if solve_at is not None else duration
-    if end - start <= 0.5:
-        start, end = 0.0, duration
-    busy = [[t - MOVE_PAD[0], t + MOVE_PAD[1]] for t in moves] + [[a - SPEECH_PAD, b + SPEECH_PAD] for a, b in speech]
+def quiet_cut(start, end, moves, speech, always=()):
+    """The stretches of [start, end] where something happens: the player talking or doing something on the board,
+    plus `always`. A quiet shorter than JOIN_S is kept whole; a longer one keeps only its first THINK_KEEP_S."""
+    busy = [[t - MOVE_PAD[0], t + MOVE_PAD[1]] for t in moves] + [[a - SPEECH_PAD, b + SPEECH_PAD] for a, b in speech] + [list(x) for x in always]
     busy = [[max(a, start), min(b, end)] for a, b in busy if b > start and a < end]
-    tail0 = max(start, end - TAIL_S)
-    busy.append([tail0, end])
     spans = _merge(busy) or [[start, end]]
     if spans[0][0] - start < JOIN_S:
         spans[0][0] = start
+    if end - spans[-1][1] < JOIN_S:
+        spans[-1][1] = end
     kept = []
     for a, b in spans:
         if kept and a - kept[-1][1] < JOIN_S:
@@ -79,6 +76,17 @@ def plan(duration, moves, speech, solve_at, first_move_at):
             if kept:
                 kept[-1][1] += THINK_KEEP_S           # a long quiet: its first moment only
             kept.append([a, b])
+    return kept
+
+
+def plan(duration, moves, speech, solve_at, first_move_at):
+    """The STORY: [(start, end, speed), ...] on the whole video's clock, and the speed chosen."""
+    start = max(0.0, (first_move_at if first_move_at is not None else 0.0) - LEAD_S)
+    end = min(duration, solve_at + AFTER_SOLVE_S) if solve_at is not None else duration
+    if end - start <= 0.5:
+        start, end = 0.0, duration
+    tail0 = max(start, end - TAIL_S)
+    kept = quiet_cut(start, end, moves, speech, always=[(tail0, end)])
     # the tail is its own piece at normal speed
     body, tail = [], []
     for a, b in kept:
@@ -94,6 +102,18 @@ def plan(duration, moves, speech, solve_at, first_move_at):
     speed = 1.0 if body_len <= room else min(MAX_SPEED, body_len / max(room, 1.0))
     segs = [(a, b, speed) for a, b in body if b - a > 0.05] + [(a, b, 1.0) for a, b in tail if b - a > 0.05]
     return segs, round(speed, 2)
+
+
+SHORT_CUT_OVER_S = 60.0   # the short-form video is cut only when the take runs longer than this
+
+
+def plan_short(duration, moves, speech, solve_at):
+    """The SHORT-FORM VIDEO (Jake, 2026-11-27): the same quiet cut as the story, never sped up, and only for a take
+    over a minute; a shorter one is kept whole. Its start and its end after the solve are kept as they are."""
+    if duration <= SHORT_CUT_OVER_S:
+        return [(0.0, duration, 1.0)]
+    always = [(0.0, min(duration, 1.5))] + ([(solve_at, duration)] if solve_at is not None else [])
+    return [(a, b, 1.0) for a, b in quiet_cut(0.0, duration, moves, speech, always=always) if b - a > 0.05]
 
 
 def _atempo(speed):
@@ -200,9 +220,10 @@ def make(job_dir: Path, replayed: dict, date: str = None) -> dict:
     story_len = make_video(full, segs, png, job_dir / "out-story.mp4")
     progress.report("story", 0.94)
     tmp = job_dir / "out.card.mp4"
-    full_len = make_video(full, [(0.0, duration, 1.0)], png, tmp)
+    short = plan_short(duration, moves, speech, solve)
+    full_len = make_video(full, short, png, tmp)
     tmp.replace(full)
-    info = {"story_s": story_len, "speed": speed, "pieces": len(segs), "full_s": full_len,
+    info = {"story_s": story_len, "speed": speed, "pieces": len(segs), "full_s": full_len, "whole_s": round(duration, 2), "short_pieces": len(short),
             "kept_s": round(sum(b - a for a, b, _ in segs), 2), "moves": len(moves), "solve_ms": (replayed or {}).get("solve_ms")}
     (job_dir / "story.json").write_text(json.dumps(info))
     return info

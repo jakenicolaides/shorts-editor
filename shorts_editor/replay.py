@@ -370,7 +370,7 @@ async def _render(log_path: Path, out_path: Path, seconds: float, speed: float =
     moves = [(e["timestamp"] - cam0) / 1000.0 for e in events
              if e["timestamp"] >= cam0 and ((e.get("type") == 3 and (e.get("data") or {}).get("source") in (2, 5, 6)
                                              and (e.get("data") or {}).get("id") not in controls)
-                                            or (e.get("type") == 5 and (e.get("data") or {}).get("tag") == "sound"))]
+                                            or (e.get("type") == 5 and (e.get("data") or {}).get("tag") in ("sound", "key")))]
     first_move_at = round(moves[0], 2) if moves else None
     css = (HERE / "rrweb.css").read_text()
     hide = [sel + " { display: none !important; }" for sel in

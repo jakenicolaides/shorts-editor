@@ -107,9 +107,11 @@ must be running, with a live `aws login`, or a player's take waits on "Waiting f
 Kept WHOLE, less only the reload gaps (`camjoin.py`), and then made a second time as a **STORY of about
 30 seconds for Instagram stories** (`story.py`, 2026-11-27; its docstring has the rules): the thinking is
 cut first, judged on talk OR board activity (never the voice alone, or a silent player loses the whole
-solve), then the rest is sped up to fit, up to 6x, voices at their own pitch, the last 2s at 1x. Both end on
+solve), then the rest is sped up to fit, up to 6x, voices at their own pitch, the last 2s at 1x. The SHORT-FORM VIDEO (the other one) gets the same quiet cut,
+never sped up, and only when the take runs over a minute (`plan_short`). A keystroke on a computer is logged as a
+`key` mark, since with the sound off it leaves nothing else. Both end on
 a CARD (the game's wordmark, the day, the solve time the game logged), drawn by Chromium since this ffmpeg
-has no drawtext. The phone shows the story first, Full beside it.
+has no drawtext. The phone shows the story first, the short-form video beside it, and keeps both for the day.
 
 ## The editor on Linux (2026-11-20)
 
