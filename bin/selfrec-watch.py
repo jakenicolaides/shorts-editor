@@ -100,14 +100,15 @@ def edit(s3, take: str, req_key: str):
         if set(found) != {"game", "cam"}:
             raise FileNotFoundError("the take is missing a track")
         segs = camjoin.segments(found["game"])   # the game was reloaded while recording: one camera file per stretch
+        gaps = []
         if segs:
             missing = [s["seg"] for s in segs if s["seg"] not in cams]
             if missing:
                 raise FileNotFoundError(f"the take is missing camera part {missing[0]}")
-            found["cam"] = camjoin.join([cams[s["seg"]] for s in segs], [s["start_ms"] for s in segs], tmp / "cam-joined.mp4")
+            found["cam"], gaps = camjoin.join([cams[s["seg"]] for s in segs], [s["start_ms"] for s in segs], tmp / "cam-joined.mp4")
             print(f"  joined {len(segs)} camera files", flush=True)
         r = worker.run(found["game"], found["cam"], ev.get("game") or "twixtle", ev.get("date"),
-                       ev.get("track") or "daily", 0.0, ev.get("title"))
+                       ev.get("track") or "daily", 0.0, ev.get("title"), cuts=gaps)
         job = Path(r["dir"])
         # WHILE THE PROTOTYPE IS TRIED (Jake's own takes only): the take's files and the cut stay on this
         # Mac, so an edit that comes out wrong can be looked into after the phone has deleted the take.

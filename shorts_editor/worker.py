@@ -27,7 +27,7 @@ from . import pipeline
 
 
 def run(game_track: Path, cam_track: Path, game: str, date: str = None, track: str = "daily",
-        offset_ms: float = 0.0, title: str = None) -> dict:
+        offset_ms: float = 0.0, title: str = None, cuts: list = None) -> dict:
     replayed = None
     # create_from_tracks MOVES its inputs into the job; the caller keeps its own copies
     with tempfile.TemporaryDirectory() as td:
@@ -42,10 +42,12 @@ def run(game_track: Path, cam_track: Path, game: str, date: str = None, track: s
         puzzle = {"date": date, "track": track} if date else {}
         job = pipeline.Job.create_from_tracks(g, c, game, puzzle, offset_ms, title,
                                               solve_at=(replayed or {}).get("solved_at"))
-    # A PLAYER'S OWN TAKE (REPLAY_PROFILE=player) gets the QUICK edit (pipeline.py): no speech model and
-    # no AI, a cut from the voice's own loudness instead. Jake: they will not wait for the full one.
+    # A PLAYER'S OWN TAKE (REPLAY_PROFILE=player) is kept WHOLE (Jake, 2026-11-27: their video should be
+    # what they recorded, pauses and all), less only `cuts`, the frozen gaps where the game was reloaded
+    # (camjoin.py). No speech model and no AI, so it is quick too (pipeline.py, _quick).
     if os.environ.get("REPLAY_PROFILE") == "player":
-        job._write_meta({**job.meta, "quick": True, "first_move_at": (replayed or {}).get("first_move_at")})
+        job._write_meta({**job.meta, "quick": True, "whole": True, "cuts": cuts or [],
+                         "first_move_at": (replayed or {}).get("first_move_at")})
     t0 = time.time()
     job.run()
     st = job.status()

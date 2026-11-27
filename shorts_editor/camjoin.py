@@ -23,18 +23,23 @@ def segments(log_path: Path) -> list:
     return sorted(segs, key=lambda s: s["seg"]) if len(segs) > 1 else []
 
 
-def join(files: list, starts_ms: list, out: Path) -> Path:
-    """files[i] began at starts_ms[i]; one file out, the gaps held on the last frame."""
+def join(files: list, starts_ms: list, out: Path):
+    """files[i] began at starts_ms[i]; one file out, the gaps held on the last frame. Returns the file
+    and where the gaps fell in it ([[start, end], ...] in seconds), which the edit cuts out."""
     info = [probe(f) for f in files]
     w, h = info[0]["width"], info[0]["height"]
     cmd = ["ffmpeg", "-y", "-v", "error"]
     for f in files:
         cmd += ["-i", str(f)]
-    parts, chain = [], ""
+    parts, chain, gaps, pos = [], "", [], 0.0
     for i, f in enumerate(files):
         gap = 0.0
         if i + 1 < len(files):
             gap = max(0.0, (starts_ms[i + 1] - starts_ms[i]) / 1000 - info[i]["duration"])
+        pos += info[i]["duration"]
+        if gap > 0:
+            gaps.append([round(pos, 3), round(pos + gap, 3)])
+            pos += gap
         v = (f"[{i}:v]scale={w}:{h}:force_original_aspect_ratio=decrease,pad={w}:{h}:(ow-iw)/2:(oh-ih)/2,"
              f"setsar=1,fps=30")
         a = f"[{i}:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo"
@@ -48,4 +53,4 @@ def join(files: list, starts_ms: list, out: Path) -> Path:
             "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p",
             "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", str(out)]
     subprocess.run(cmd, check=True, capture_output=True)
-    return out
+    return out, gaps

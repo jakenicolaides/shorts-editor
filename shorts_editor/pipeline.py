@@ -283,6 +283,20 @@ class Job:
     def _quick(self, src, info):
         tok = self.token
         t0 = time.time()
+        if self.meta.get("whole"):   # a player's own video: all of it, less the reload gaps (worker.py)
+            d = float(info["duration"])
+            _write(self.dir / "transcript.json", {"words": [{"w": "~", "s": 0.0, "e": d, "filler": False, "p": 1.0}], "quick": True})
+            solve = self.meta.get("solve_at")
+            _write(self.dir / "solve.json", {"game": self.meta.get("game"), "at": solve, "score": 1.0 if solve is not None else 0.0})
+            p = cutlist.Params.from_dict(_read(self.dir / "params.json"))
+            p.start_override, p.end_override, p.max_gap = 0.0, d, 1e9
+            p.remove_fillers = p.drop_false_starts = False
+            p.extra_cuts = [[float(a), float(b)] for a, b in (self.meta.get("cuts") or [])]
+            _write(self.dir / "params.json", p.to_dict())
+            self.set(stage="cut", progress=45, msg=f"kept whole, {len(p.extra_cuts)} reload gaps cut")
+            self.recut(fit=False)
+            self.rerender()
+            return
         voice = self.dir / "voice.wav"   # the presenter's own microphone, without the game's sounds
         transcribe.extract_audio(getattr(src, "cam", None) or getattr(src, "sound", src), voice, token=tok)
         words = _speech_stretches(voice)
@@ -434,7 +448,7 @@ class Job:
             res["flags"] = [f for f in res["flags"] if f != "no_solve_detected"]
         # snap the first and last cut to the audio: Whisper's word times are late
         # at onsets and early at offsets, and the brief is no space either side
-        if res["keep"]:
+        if res["keep"] and not self.meta.get("whole"):   # a player's video is kept to its very ends
             db, dt = transcribe.frame_db(self.dir / "audio.wav")
             s0 = transcribe.snap_start(db, dt, res["keep"][0][0] + p.start_air)
             res["keep"][0][0] = round(max(0.0, s0 - p.start_air), 3)
