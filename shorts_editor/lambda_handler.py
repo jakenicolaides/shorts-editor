@@ -49,7 +49,7 @@ BUCKET = os.environ.get("TAKES_BUCKET", "twixtle-shorts")
 PREFIX = "takes/"
 KEEP = ("out.mp4", "transcript.json", "cut.json", "params.json", "relax.json", "solve.json",
         "meta.json", "status.json", "title.json", "probe.json", "loudness_in.json", "loudness_out.json",
-        "history.json", "traceback.txt")
+        "history.json", "traceback.txt", "out-story.mp4", "story.json")   # the last two: a player's take only (story.py)
 
 
 MODEL_PREFIX = "models/faster-whisper-large-v3-turbo/"

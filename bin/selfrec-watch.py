@@ -130,6 +130,8 @@ def edit(s3, take: str, req_key: str):
         res.update({"stage": r["stage"], "error": r["error"], "final_duration": r["final_duration"],
                     "flags": r["flags"], "title": r["title"]})
         print(f"  edited in {time.time() - t0:.0f}s: {r['stage']} {r['final_duration']}s {r.get('replay', {}).get('size')}", flush=True)
+        if r.get("story"):
+            print(f"  story: {r['story']}", flush=True)
     except Exception as e:
         res["error"] = str(e)[:300]
         traceback.print_exc()

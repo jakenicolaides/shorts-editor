@@ -5,7 +5,7 @@ whole edit's fraction there, and the watcher sends it on to storage every couple
 phone's status checks read it. Unset, it does nothing, so the presenters' edits are untouched.
 
 Steps and their share of the whole: drawing the game 0 to 65%, cutting 66%, balancing the sound 70%,
-rendering 70 to 98%. Measured on a phone take: drawing is most of the time.
+rendering 70 to 88%, the story and the end card (story.py) 88 to 98%. Measured on a phone take: drawing is most of the time.
 """
 import json
 import os

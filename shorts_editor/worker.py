@@ -50,13 +50,21 @@ def run(game_track: Path, cam_track: Path, game: str, date: str = None, track: s
                          "first_move_at": (replayed or {}).get("first_move_at")})
     t0 = time.time()
     job.run()
+    story = None
+    if os.environ.get("REPLAY_PROFILE") == "player" and job.status().get("stage") == "review":
+        # the 30 second story beside the whole video, and the end card on both (story.py)
+        from . import story as story_mod
+        try:
+            story = story_mod.make(job.dir, replayed, date)
+        except Exception as e:   # the whole video is still there: a player gets that rather than nothing
+            story = {"error": str(e)[:300]}
     st = job.status()
     cut = pipeline._read(job.dir / "cut.json") or {}
     return {
         "job": job.id, "dir": str(job.dir), "stage": st.get("stage"), "error": st.get("error"),
         "seconds": round(time.time() - t0, 1), "final_duration": cut.get("final_duration"),
         "flags": cut.get("flags"), "title": job.meta.get("title"), "log": st.get("log", []),
-        **({"replay": replayed} if replayed else {}),
+        **({"replay": replayed} if replayed else {}), **({"story": story} if story else {}),
     }
 
 

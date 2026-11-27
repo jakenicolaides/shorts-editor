@@ -97,7 +97,7 @@ class Job:
         elif s == "loudness":
             progress.report("sound", 0.70)
         elif s == "render":
-            progress.report("render", 0.70 + 0.28 * max(0.0, min(1.0, (p - 55) / 40)))
+            progress.report("render", 0.70 + 0.18 * max(0.0, min(1.0, (p - 55) / 40)))
 
     @property
     def input(self):

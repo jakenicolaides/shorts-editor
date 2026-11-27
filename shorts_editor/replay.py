@@ -359,6 +359,9 @@ async def _render(log_path: Path, out_path: Path, seconds: float, speed: float =
     solved = [(e["timestamp"] - cam0) / 1000.0 for e in events
               if e.get("type") == 5 and (e.get("data") or {}).get("tag") == "solved"]
     solved_at = round(solved[0], 2) if solved and 0 <= solved[0] <= seconds else None
+    # the solve time the game showed (its clock, not the camera's), for the end card (story.py)
+    solve_ms = next((((e.get("data") or {}).get("payload") or {}).get("ms") for e in events
+                     if e.get("type") == 5 and (e.get("data") or {}).get("tag") == "solved"), None)
     # the player's first move after the camera started: a tap, a click, a typed letter or a key sound,
     # which is where a player's quick cut starts (pipeline.py, quick)
     # A tap on the recording's own controls (Stop, above all) is not a move: a take with no move before
@@ -501,7 +504,8 @@ async def _render(log_path: Path, out_path: Path, seconds: float, speed: float =
         raise RuntimeError("the game could not be redrawn from its log")
     return {"frames_drawn": state["got"], "frames_written": total, "seconds": round(time.time() - t_all, 1),
             "sound_seconds": round(t_sound, 1), "sounds": snd["made"], "sounds_missing": snd["missing"],
-            "size": [w, h], "scale": round(scale, 3), "speed": speed, "pointer": pointer, "refused": refused[:10], "lead_in": round(lead_in, 3), "solved_at": solved_at, "first_move_at": first_move_at}
+            "size": [w, h], "scale": round(scale, 3), "speed": speed, "pointer": pointer, "refused": refused[:10], "lead_in": round(lead_in, 3), "solved_at": solved_at, "first_move_at": first_move_at,
+            "solve_ms": solve_ms, "moves": [round(t, 2) for t in moves if 0 <= t <= seconds]}
 
 
 if __name__ == "__main__":

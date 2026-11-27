@@ -71,7 +71,7 @@ a 4:17 take from 131s (join 51, render 80) to 78s.
   anything listens. Transcribing the microphone alone and finding the chime in the game's
   sound alone would both be cleaner than what OBS ever gave.
 
-## A game redrawn from its log (on trial, 2026-11-26, branch `game-log`, NOT shipped)
+## A game redrawn from its log (every presenter from 2026-11-27)
 
 A take's game track may be a LOG of the game's screen (`game.json`, gzipped rrweb events plus
 the camera's start time) instead of a film of it, for laptops too slow to film a tab and a
@@ -99,6 +99,17 @@ take. **The pointer is drawn** (Jake: it shows what the presenter means), as his
 browser runs with web security off beside the model's key and the bucket's role. A log recorded
 on a dev server needs its address in `REPLAY_ALLOWED_ORIGINS`. **Its Chromium is not on the
 security watch, by choice (Jake, 2026-11-26)**: it is refreshed whenever the image is rebuilt.
+
+## A player's own take (Twixtle's record mode, admin-only prototype, 2026-11-26)
+
+Edited on Jake's Mac by `bin/selfrec-watch.py` (`SELFREC_EDITOR=mac` on the posting app), not Lambda: it
+must be running, with a live `aws login`, or a player's take waits on "Waiting for the editor" for ever.
+Kept WHOLE, less only the reload gaps (`camjoin.py`), and then made a second time as a **STORY of about
+30 seconds for Instagram stories** (`story.py`, 2026-11-27; its docstring has the rules): the thinking is
+cut first, judged on talk OR board activity (never the voice alone, or a silent player loses the whole
+solve), then the rest is sped up to fit, up to 6x, voices at their own pitch, the last 2s at 1x. Both end on
+a CARD (the game's wordmark, the day, the solve time the game logged), drawn by Chromium since this ffmpeg
+has no drawtext. The phone shows the story first, Full beside it.
 
 ## The editor on Linux (2026-11-20)
 
