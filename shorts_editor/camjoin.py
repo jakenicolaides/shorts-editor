@@ -54,3 +54,21 @@ def join(files: list, starts_ms: list, out: Path):
             "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", str(out)]
     subprocess.run(cmd, check=True, capture_output=True)
     return out, gaps
+
+
+def with_length(path: Path) -> Path:
+    """The camera file, with its length written in it. A phone that records WebM (Android Chrome, Firefox)
+    sends it in pieces as it goes and never gets to write how long it ran, and everything after this asks
+    the file for its length. Copied into a new file, which does: no re-encode, about a second."""
+    path = Path(path)
+    out = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(path)],
+                         capture_output=True, text=True).stdout.strip()
+    try:
+        if float(out) > 0:
+            return path
+    except ValueError:
+        pass
+    fixed = path.with_name(path.stem + "-len" + path.suffix)
+    subprocess.run(["ffmpeg", "-y", "-v", "error", "-i", str(path), "-map", "0", "-c", "copy", str(fixed)],
+                   check=True, capture_output=True)
+    return fixed

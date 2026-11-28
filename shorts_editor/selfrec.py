@@ -85,6 +85,8 @@ def edit(s3, take: str, ev: dict, work: Path, keep: Path = None, cpu: str = None
     try:
         if set(found) != {"game", "cam"}:
             raise FileNotFoundError("the take is missing a track")
+        cams = {k: camjoin.with_length(v) for k, v in cams.items()}   # a WebM camera file carries no length
+        found["cam"] = cams[0]
         segs = camjoin.segments(found["game"])   # the game was reloaded while recording: one camera file per stretch
         gaps = []
         if segs:
